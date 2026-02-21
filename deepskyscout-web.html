@@ -120,7 +120,8 @@
     .form-row label{display:block;margin-bottom:6px;opacity:.9}
     .form-row select,
     .form-row input[type="number"],
-    .form-row input[type="range"]{
+    .form-row input[type="range"],
+    .form-row input[type="file"]{
       width:100%;padding:10px 12px;border-radius:10px;
       border:1px solid rgba(255,255,255,.15);
       background:rgba(0,0,0,.25);color:inherit;outline:none
@@ -235,6 +236,7 @@
 </head>
 
 <body>
+  <!-- ✅ Correct nav: no Projects, label is DeepSkyScout -->
   <nav>
     <a href="index.html">Home</a>
     <a href="astro.html">Astro Photos</a>
@@ -261,15 +263,22 @@
           </div>
 
           <div class="form-row">
-            <label for="horizonSelect">Horizon altitude</label>
+            <label for="horizonSelect">
+              Horizon altitude
+              <span class="muted" id="horizonFileStatus"> • No file loaded</span>
+            </label>
             <select id="horizonSelect">
               <option value="0">0°</option>
               <option value="10">10°</option>
               <option value="20" selected>20°</option>
               <option value="30">30°</option>
               <option value="40">40°</option>
+              <!-- Custom options injected by JS -->
             </select>
           </div>
+
+          <!-- Hidden file input triggered by dropdown -->
+          <input id="horizonFileInput" type="file" accept=".hrz,.csv,.txt,text/plain,text/csv" style="display:none;" />
 
           <div class="form-row">
             <label for="minPixelsInput">
@@ -439,6 +448,7 @@
   <!-- Aladin Lite v3 -->
   <script type="text/javascript" src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js" charset="utf-8"></script>
 
+  <!-- ✅ Full script kept (this is the version that loads JSONs) -->
   <script>
     const $ = (id) => document.getElementById(id);
 
@@ -481,6 +491,11 @@
     let aladin = null;
     let aladinInitStarted = false;
     let aladinReady = false;
+
+    // Custom horizon profile
+    let HORIZON_PROFILE = null;       // { filename: string, points: [{az, alt}] }
+    let HORIZON_MODE = "numeric";     // "numeric" | "custom"
+    let LAST_NUMERIC_HORIZON_DEG = 20;
 
     // -----------------------------
     // View switching
@@ -588,6 +603,199 @@
     function formatMagnitude(val) {
       const n = parseMagnitude(val);
       return Number.isFinite(n) ? n.toFixed(2) : "—";
+    }
+
+    // -----------------------------
+    // Horizon profile parsing (comma / csv / tab / space)
+    // -----------------------------
+    function normalizeAz360ForInput(az) {
+      const eps = 1e-9;
+      if (!Number.isFinite(az)) return NaN;
+      if (Math.abs(az - 360) < eps) return 360;
+      let a = az % 360;
+      if (a < 0) a += 360;
+      if (Math.abs(a) < eps && az > 0) return 360;
+      return a;
+    }
+
+    function normalizeAz(az) {
+      let a = az % 360;
+      if (a < 0) a += 360;
+      return a;
+    }
+
+    function extractFirstTwoNumbers(line) {
+      const m = String(line).match(/-?\d+(\.\d+)?/g);
+      if (!m || m.length < 2) return null;
+      const a = Number(m[0]);
+      const b = Number(m[1]);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+      return [a, b];
+    }
+
+    function computeAltAt0FromWrap(sortedPtsNo0No360) {
+      if (!sortedPtsNo0No360 || sortedPtsNo0No360.length < 2) return null;
+      const first = sortedPtsNo0No360[0];
+      const last = sortedPtsNo0No360[sortedPtsNo0No360.length - 1];
+      const span = (first.az + 360) - last.az;
+      if (!(span > 0)) return first.alt;
+      const u = (360 - last.az) / span;
+      return last.alt + u * (first.alt - last.alt);
+    }
+
+    function parseHorizonFileText(text, filename = "horizon") {
+      const pts = [];
+      const lines = String(text).split(/\r?\n/);
+
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (line.startsWith("#") || line.startsWith("//")) continue;
+
+        const nums = extractFirstTwoNumbers(line);
+        if (!nums) continue;
+
+        const az = normalizeAz360ForInput(nums[0]);
+        const alt = Number(nums[1]);
+
+        if (!Number.isFinite(az) || !Number.isFinite(alt)) continue;
+        pts.push({ az, alt });
+      }
+
+      if (pts.length < 2) throw new Error("Horizon file must contain at least 2 valid lines with: az_deg, alt_deg (comma/tab/space separated).");
+
+      pts.sort((a,b) => a.az - b.az);
+
+      // dedupe by az (keep last)
+      const dedup = [];
+      for (const p of pts) {
+        if (dedup.length && Math.abs(dedup[dedup.length - 1].az - p.az) < 1e-9) {
+          dedup[dedup.length - 1] = p;
+        } else {
+          dedup.push(p);
+        }
+      }
+
+      // Ensure 0 and 360 exist and match (close loop)
+      let has0 = dedup.length && Math.abs(dedup[0].az - 0) < 1e-9;
+      let has360 = dedup.length && Math.abs(dedup[dedup.length - 1].az - 360) < 1e-9;
+
+      const no0no360 = dedup.filter(p => p.az > 0 && p.az < 360);
+
+      let alt0 = null;
+      if (has0) alt0 = dedup[0].alt;
+      else if (has360) alt0 = dedup[dedup.length - 1].alt;
+      else alt0 = computeAltAt0FromWrap(no0no360.length ? no0no360 : dedup);
+
+      if (!Number.isFinite(alt0)) alt0 = dedup[0].alt;
+
+      if (!has0) dedup.unshift({ az: 0, alt: alt0 });
+      if (!has360) dedup.push({ az: 360, alt: alt0 });
+
+      dedup[dedup.length - 1].alt = dedup[0].alt;
+
+      return { filename, points: dedup };
+    }
+
+    function customHorizonAltAtAz(azDeg) {
+      if (!HORIZON_PROFILE) return NaN;
+      const pts = HORIZON_PROFILE.points;
+      const a = normalizeAz(azDeg);
+
+      let lo = 0, hi = pts.length - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (pts[mid].az <= a) lo = mid;
+        else hi = mid;
+      }
+
+      const p0 = pts[lo];
+      const p1 = pts[hi];
+      const span = (p1.az - p0.az) || 1;
+      const u = (a - p0.az) / span;
+      return p0.alt + u * (p1.alt - p0.alt);
+    }
+
+    function getHorizonFloorDeg() {
+      const v = Number(LAST_NUMERIC_HORIZON_DEG);
+      return Number.isFinite(v) ? v : 20;
+    }
+
+    function getHorizonAtAzFn() {
+      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
+        return (az) => {
+          const v = customHorizonAltAtAz(az);
+          // standalone custom; if weird input, fall back to 0° (not the numeric floor)
+          return Number.isFinite(v) ? v : 0;
+        };
+      }
+      const floor = getHorizonFloorDeg();
+      return (_az) => floor;
+    }
+
+    function rebuildHorizonSelectOptions() {
+      const sel = $("horizonSelect");
+
+      const numeric = [
+        { v:"0",  t:"0°"  },
+        { v:"10", t:"10°" },
+        { v:"20", t:"20°" },
+        { v:"30", t:"30°" },
+        { v:"40", t:"40°" }
+      ];
+
+      sel.innerHTML = "";
+      for (const o of numeric) {
+        const opt = document.createElement("option");
+        opt.value = o.v;
+        opt.textContent = o.t;
+        sel.appendChild(opt);
+      }
+
+      const sep = document.createElement("option");
+      sep.disabled = true;
+      sep.textContent = "— Custom horizon —";
+      sel.appendChild(sep);
+
+      if (HORIZON_PROFILE) {
+        const customOpt = document.createElement("option");
+        customOpt.value = "__custom__";
+        customOpt.textContent = `Custom horizon (${HORIZON_PROFILE.filename})`;
+        sel.appendChild(customOpt);
+      }
+
+      const loadOpt = document.createElement("option");
+      loadOpt.value = "__load__";
+      loadOpt.textContent = HORIZON_PROFILE ? "Load/Replace custom horizon…" : "Load custom horizon…";
+      sel.appendChild(loadOpt);
+
+      const clearOpt = document.createElement("option");
+      clearOpt.value = "__clear__";
+      clearOpt.textContent = "Clear custom horizon";
+      clearOpt.disabled = !HORIZON_PROFILE;
+      sel.appendChild(clearOpt);
+
+      // selection
+      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
+        sel.value = "__custom__";
+      } else {
+        sel.value = String(LAST_NUMERIC_HORIZON_DEG);
+        if (![...sel.options].some(o => o.value === sel.value)) sel.value = "20";
+      }
+    }
+
+    function updateHorizonStatus() {
+      const el = $("horizonFileStatus");
+      if (!el) return;
+
+      if (!HORIZON_PROFILE) {
+        el.textContent = " • No file loaded";
+        if (HORIZON_MODE === "custom") HORIZON_MODE = "numeric";
+      } else {
+        el.textContent = ` • Custom: ${HORIZON_PROFILE.filename}`;
+      }
+
+      rebuildHorizonSelectOptions();
     }
 
     // -----------------------------
@@ -991,8 +1199,8 @@
       return { altDeg, azDeg };
     }
 
-    // Updated: adds avgAltDeg (time-weighted average altitude above horizon limit)
-    function computeVisibilityForObjectInWindow(location, horizonDeg, raDeg, decDeg, startUtc, endUtc){
+    // Standalone horizon: uses ONLY numeric floor OR ONLY custom profile (no stacking)
+    function computeVisibilityForObjectInWindow(location, horizonAtAzFn, raDeg, decDeg, startUtc, endUtc){
       const latDeg = Number(location.latitude);
       const lonDeg = Number(location.longitude);
 
@@ -1005,25 +1213,29 @@
       for (let t = startMs; t <= endMs; t += stepSec*1000) timesMs.push(t);
       if (timesMs[timesMs.length - 1] !== endMs) timesMs.push(endMs);
 
-      const alts = new Array(timesMs.length);
+      const n = timesMs.length;
+      const alts = new Array(n);
+      const hzs  = new Array(n);
+
       let maxAlt = -1e9;
-      for (let i = 0; i < timesMs.length; i++) {
-        const { altDeg } = raDecToAltAz(new Date(timesMs[i]), raDeg, decDeg, latDeg, lonDeg);
+      for (let i = 0; i < n; i++) {
+        const { altDeg, azDeg } = raDecToAltAz(new Date(timesMs[i]), raDeg, decDeg, latDeg, lonDeg);
         alts[i] = altDeg;
+        hzs[i] = horizonAtAzFn(azDeg);
         if (altDeg > maxAlt) maxAlt = altDeg;
       }
 
       let visibleSec = 0;
       let sumAltSec = 0;
 
-      let wasAbove = (alts[0] >= horizonDeg);
+      let wasAbove = ((alts[0] - hzs[0]) >= 0);
       let segStartMs = wasAbove ? timesMs[0] : null;
 
       let bestDurSec = 0;
       let bestStart = null;
       let bestEnd = null;
 
-      for (let i = 0; i < timesMs.length - 1; i++) {
+      for (let i = 0; i < n - 1; i++) {
         const t0 = timesMs[i];
         const t1 = timesMs[i+1];
         const dtSec = (t1 - t0) / 1000;
@@ -1031,8 +1243,11 @@
         const alt0 = alts[i];
         const alt1 = alts[i+1];
 
-        const d0 = alt0 - horizonDeg;
-        const d1 = alt1 - horizonDeg;
+        const hz0 = hzs[i];
+        const hz1 = hzs[i+1];
+
+        const d0 = alt0 - hz0;
+        const d1 = alt1 - hz1;
 
         const a0 = (d0 >= 0);
         const a1 = (d1 >= 0);
@@ -1047,18 +1262,20 @@
         const denom = (d0 - d1);
         let u = (denom === 0) ? 0.5 : (d0 / denom);
         u = clamp(u, 0, 1);
+
         const tCross = t0 + u * (t1 - t0);
+        const altCross = alt0 + u * (alt1 - alt0);
 
         if (!a0 && a1) {
           const dtAbove = (t1 - tCross) / 1000;
           visibleSec += dtAbove;
-          sumAltSec += ((horizonDeg + alt1) * 0.5) * dtAbove;
+          sumAltSec += ((altCross + alt1) * 0.5) * dtAbove;
 
           if (!wasAbove) { segStartMs = tCross; wasAbove = true; }
         } else if (a0 && !a1) {
           const dtAbove = (tCross - t0) / 1000;
           visibleSec += dtAbove;
-          sumAltSec += ((alt0 + horizonDeg) * 0.5) * dtAbove;
+          sumAltSec += ((alt0 + altCross) * 0.5) * dtAbove;
 
           if (wasAbove && segStartMs != null) {
             const segEndMs = tCross;
@@ -1088,10 +1305,11 @@
       };
     }
 
-    function computeVisibilityForAllObjects(location, horizonDeg){
+    function computeVisibilityForAllObjects(location){
       NIGHT_WINDOW = buildNightWindowUtc(location);
       DAY_SPANS = buildDaySpansUtc(location);
 
+      const horizonAtAzFn = getHorizonAtAzFn();
       const results = new Map();
 
       for (let idx = 0; idx < OBJECTS.length; idx++) {
@@ -1105,7 +1323,7 @@
         }
 
         const r = computeVisibilityForObjectInWindow(
-          location, horizonDeg, raDeg, decDeg,
+          location, horizonAtAzFn, raDeg, decDeg,
           NIGHT_WINDOW.startUtc, NIGHT_WINDOW.endUtc
         );
         results.set(idx, r);
@@ -1148,7 +1366,7 @@
       const px = Number(cam.pixel_um);
       if (!Number.isFinite(effFocal) || effFocal <= 0 || !Number.isFinite(px) || px <= 0) return null;
 
-      return 206.265 * px / effFocal; // arcsec / pixel
+      return 206.265 * px / effFocal; // arcsec / pixel (internal only)
     }
 
     function objectPixelsMajor(o, scaleArcsecPerPx) {
@@ -1332,25 +1550,29 @@
       updateCaption();
     }
 
+    function horizonModeLabel() {
+      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) return `custom (${HORIZON_PROFILE.filename})`;
+      return `${getHorizonFloorDeg()}°`;
+    }
+
     function nightStatusLine(loc) {
       const tz = NIGHT_WINDOW?.tz || loc?.timezone || "UTC";
       if (NIGHT_WINDOW?.startUtc && NIGHT_WINDOW?.endUtc) {
         const r = formatTimeRangeLocal(NIGHT_WINDOW.startUtc.getTime(), NIGHT_WINDOW.endUtc.getTime(), tz);
-        return `Sunset–Sunrise: ${r}`;
+        return `Sunset–Sunrise: ${r} • Horizon: ${horizonModeLabel()}`;
       }
       return "Sunset–Sunrise: —";
     }
 
     async function recomputeVisibilityAndRender() {
       const loc = getSelected($("locationSelect"), LOCATIONS);
-      const horizonDeg = Number($("horizonSelect").value);
 
       $("objectsStatus").textContent = "⏳ Calculating visibility…";
       $("objectsTbody").innerHTML = `<tr><td colspan="7" class="muted" style="padding:12px;">Calculating…</td></tr>`;
 
       await new Promise(r => setTimeout(r, 0));
 
-      VIS_RESULTS = computeVisibilityForAllObjects(loc, horizonDeg);
+      VIS_RESULTS = computeVisibilityForAllObjects(loc);
 
       buildTypeFilterOptions();
       refreshTableOnly();
@@ -1400,7 +1622,7 @@
 
     function updateFovLabels(){
       const minPx = Math.max(0, Number($("minPixelsInput").value || 0));
-      const scaleArcsecPerPx = computeImageScaleArcsecPerPixel(); // arcsec/px
+      const scaleArcsecPerPx = computeImageScaleArcsecPerPixel(); // internal arcsec/px
       const minDeg = Number.isFinite(scaleArcsecPerPx) ? (minPx * scaleArcsecPerPx / 3600) : NaN;
 
       const mosaic = Number($("mosaicRange").value) || 1;
@@ -1435,7 +1657,7 @@
       return cn ? `${n} <span class="muted">(${safe(cn)})</span>` : n;
     }
 
-    function buildTonightSummaryHtml(loc, horizonDeg, obj) {
+    function buildTonightSummaryHtml(loc, obj) {
       const tz = NIGHT_WINDOW?.tz || loc?.timezone || "UTC";
       const vis = (selectedObjectIdx != null) ? VIS_RESULTS.get(selectedObjectIdx) : null;
 
@@ -1476,7 +1698,6 @@
     function updateCaption() {
       const cap = $("chartCaption");
       const loc = getSelected($("locationSelect"), LOCATIONS);
-      const horizonDeg = Number($("horizonSelect").value);
       const obj = getSelectedObjectSafe();
       const { scopeName, fovDeg } = getRigInfo();
 
@@ -1491,11 +1712,15 @@
         return;
       }
 
+      const horizonLabel = (HORIZON_MODE === "custom" && HORIZON_PROFILE)
+        ? `custom (${safe(HORIZON_PROFILE.filename)})`
+        : `${getHorizonFloorDeg()}°`;
+
       if (viewMode === "night") {
         const legendLine =
-          `Day=yellow / Night=blue • Current position=red • Meridian=green • Horizon limit=${horizonDeg}°`;
+          `Day=yellow / Night=blue • Current position=red • Meridian=green • Horizon limit=${horizonLabel}`;
 
-        const tonight = buildTonightSummaryHtml(loc, horizonDeg, obj);
+        const tonight = buildTonightSummaryHtml(loc, obj);
 
         cap.innerHTML = `
           <div class="muted">${legendLine}</div>
@@ -1514,7 +1739,7 @@
 
       if (viewMode === "image") {
         const topLine = buildImageTopLine(obj);
-        const tonight = buildTonightSummaryHtml(loc, horizonDeg, obj);
+        const tonight = buildTonightSummaryHtml(loc, obj);
 
         cap.innerHTML = `
           <div><strong>${topLine}</strong></div>
@@ -1552,7 +1777,7 @@
           Year: <code>${YEAR_DATA.year}</code> • Best month (mid-month sample): <code>${bestLabel}</code> • Max: <code>${maxH.toFixed(2)}h</code>
         </div>
         <div class="muted" style="margin-top:4px;">
-          Computed at horizon limit ${horizonDeg}° using sunset→sunrise windows.
+          Computed using horizon limit <code>${horizonLabel}</code> and sunset→sunrise windows.
         </div>
         <div class="muted" style="margin-top:6px;">
           Rig: <code>${safe(scopeName)}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>
@@ -1697,12 +1922,41 @@
       ctx.restore();
     }
 
+    function drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(160,200,140,0.98)";
+      ctx.lineWidth = 3.0;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+
+      let first = true;
+      for (let az = 0; az <= 360; az += 2) {
+        const alt = horizonAtAzFn(az);
+        const p = projectAltAz(alt, az, cx, cy, radiusMax);
+        if (first) { ctx.moveTo(p.x, p.y); first = false; }
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawNumericHorizonCircle(ctx, cx, cy, radiusMax, horizonDeg) {
+      const rH = ((90 - horizonDeg)/90) * radiusMax;
+      ctx.setLineDash([7, 7]);
+      ctx.strokeStyle = "rgba(160,200,140,0.92)";
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rH, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     function drawNightChart() {
       if (viewMode !== "night") return;
 
       const canvas = $("skyCanvas");
       const loc = getSelected($("locationSelect"), LOCATIONS);
-      const horizonDeg = Number($("horizonSelect").value);
+      const horizonAtAzFn = getHorizonAtAzFn();
 
       if (!canvas || !loc || selectedObjectIdx == null || !OBJECTS[selectedObjectIdx] || !NIGHT_WINDOW) return;
 
@@ -1743,18 +1997,22 @@
         drawEquatorialGrid(ctx, loc, new Date(midMs), cx, cy, radiusMax);
       }
 
-      const rH = ((90 - horizonDeg)/90) * radiusMax;
-      ctx.setLineDash([7, 7]);
-      ctx.strokeStyle = "rgba(160,200,140,0.92)";
-      ctx.lineWidth = 2.8;
-      ctx.beginPath();
-      ctx.arc(cx, cy, rH, 0, Math.PI*2);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      // Horizon visualization: standalone (either circle OR custom curve)
+      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
+        drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
 
-      {
         const labelAz = 135;
-        const p = projectAltAz(horizonDeg, labelAz, cx, cy, radiusMax);
+        const hAlt = horizonAtAzFn(labelAz);
+        const p = projectAltAz(hAlt, labelAz, cx, cy, radiusMax);
+        ctx.fillStyle = "rgba(160,200,140,0.95)";
+        ctx.font = "15px ui-sans-serif, system-ui";
+        ctx.fillText("Custom horizon", p.x + 10, p.y);
+      } else {
+        const floorDeg = getHorizonFloorDeg();
+        drawNumericHorizonCircle(ctx, cx, cy, radiusMax, floorDeg);
+
+        const labelAz = 135;
+        const p = projectAltAz(floorDeg, labelAz, cx, cy, radiusMax);
         ctx.fillStyle = "rgba(160,200,140,0.95)";
         ctx.font = "15px ui-sans-serif, system-ui";
         ctx.fillText("Horizon", p.x + 10, p.y);
@@ -1806,9 +2064,10 @@
         const A = pts[i-1];
         const B = pts[i];
         const midT = (A.t + B.t) / 2;
-        const midAlt = (A.altDeg + B.altDeg) / 2;
 
-        if (midAlt < horizonDeg) continue;
+        const mid = raDecToAltAz(new Date(midT), raDeg, decDeg, latDeg, lonDeg);
+        const hMid = horizonAtAzFn(mid.azDeg);
+        if (mid.altDeg < hMid) continue;
 
         const day = isDayMs(midT);
         const col = day ? "rgba(255,200,90,0.62)" : "rgba(120,170,255,0.92)";
@@ -1817,7 +2076,9 @@
 
       function markAt(ms, label, color){
         const { altDeg, azDeg } = raDecToAltAz(new Date(ms), raDeg, decDeg, latDeg, lonDeg);
+        const hHere = horizonAtAzFn(azDeg);
         const xy = projectAltAz(altDeg, azDeg, cx, cy, radiusMax);
+
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.arc(xy.x, xy.y, 4.8, 0, Math.PI*2);
@@ -1825,7 +2086,8 @@
 
         ctx.fillStyle = "rgba(255,255,255,0.88)";
         ctx.font = "14px ui-sans-serif, system-ui";
-        ctx.fillText(label, xy.x + 8, xy.y - 8);
+        const suffix = (altDeg < hHere) ? " (below horizon)" : "";
+        ctx.fillText(label + suffix, xy.x + 8, xy.y - 8);
       }
 
       if (sunsetMs >= trackStart && sunsetMs <= trackEnd) {
@@ -1851,10 +2113,13 @@
         ctx.fillText(tLabel, xy.x - tw/2, xy.y + 18);
       }
 
+      // current position marker (only if above horizon)
       {
         const now = Date.now();
         const { altDeg, azDeg } = raDecToAltAz(new Date(now), raDeg, decDeg, latDeg, lonDeg);
-        if (altDeg >= horizonDeg) {
+        const hNow = horizonAtAzFn(azDeg);
+
+        if (altDeg >= hNow) {
           const xy = projectAltAz(altDeg, azDeg, cx, cy, radiusMax);
           ctx.strokeStyle = "rgba(255,80,80,0.95)";
           ctx.lineWidth = 2.3;
@@ -1874,7 +2139,6 @@
     // -----------------------------
     function computeYearIfPossible() {
       const loc = getSelected($("locationSelect"), LOCATIONS);
-      const horizonDeg = Number($("horizonSelect").value);
       if (!loc || selectedObjectIdx == null || !OBJECTS[selectedObjectIdx]) { YEAR_DATA = null; return; }
 
       const obj = OBJECTS[selectedObjectIdx];
@@ -1886,13 +2150,14 @@
       const { y: year, m: monthNow } = getZonedYMD(new Date(), tz);
       const currentMonthIdx = clamp(monthNow - 1, 0, 11);
 
+      const horizonAtAzFn = getHorizonAtAzFn();
       const months = [];
       const maxAltByMonth = [];
 
       for (let month = 1; month <= 12; month++) {
         const day = 15;
         const win = buildNightWindowUtcForYMD(loc, year, month, day);
-        const r = computeVisibilityForObjectInWindow(loc, horizonDeg, raDeg, decDeg, win.startUtc, win.endUtc);
+        const r = computeVisibilityForObjectInWindow(loc, horizonAtAzFn, raDeg, decDeg, win.startUtc, win.endUtc);
         months.push(Math.max(0, r.totalMinutes || 0));
         maxAltByMonth.push((r.maxAltDeg != null && Number.isFinite(r.maxAltDeg)) ? r.maxAltDeg : null);
       }
@@ -2189,6 +2454,7 @@
 
       $("mosaicLabel").textContent = `${$("mosaicRange").value}×`;
       updateFovLabels();
+      updateHorizonStatus();
 
       if (loadState.objects.ok && loadState.locations.ok) {
         buildTypeFilterOptions();
@@ -2221,14 +2487,58 @@
       });
 
       $("horizonSelect").addEventListener("change", async () => {
-        await recomputeVisibilityAndRender();
-        if (viewMode === "night") drawNightChart();
-        if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
-        updateCaption();
+        const v = $("horizonSelect").value;
+
+        if (v === "__load__") {
+          rebuildHorizonSelectOptions();
+          $("horizonFileInput").click();
+          return;
+        }
+
+        if (v === "__clear__") {
+          HORIZON_PROFILE = null;
+          HORIZON_MODE = "numeric";
+          $("horizonFileInput").value = "";
+          updateHorizonStatus();
+
+          await recomputeVisibilityAndRender();
+          if (viewMode === "night") drawNightChart();
+          if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+          updateCaption();
+          return;
+        }
+
+        if (v === "__custom__") {
+          if (HORIZON_PROFILE) {
+            HORIZON_MODE = "custom";
+            updateHorizonStatus();
+            await recomputeVisibilityAndRender();
+            if (viewMode === "night") drawNightChart();
+            if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+            updateCaption();
+          } else {
+            HORIZON_MODE = "numeric";
+            updateHorizonStatus();
+          }
+          return;
+        }
+
+        // numeric
+        const n = Number(v);
+        if (Number.isFinite(n)) {
+          LAST_NUMERIC_HORIZON_DEG = n;
+          HORIZON_MODE = "numeric";
+          updateHorizonStatus();
+
+          await recomputeVisibilityAndRender();
+          if (viewMode === "night") drawNightChart();
+          if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+          updateCaption();
+        }
       });
 
       $("minPixelsInput").addEventListener("input", () => {
-        updateFovLabels();   // THIS updates with pixel changes
+        updateFovLabels();
         refreshTableOnly();
       });
 
@@ -2237,6 +2547,28 @@
         updateFovLabels();
         if (viewMode === "image") updateAladinFromSelection(true);
         updateCaption();
+      });
+
+      $("horizonFileInput").addEventListener("change", async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+          const text = await file.text();
+          HORIZON_PROFILE = parseHorizonFileText(text, file.name);
+          HORIZON_MODE = "custom";
+          updateHorizonStatus();
+
+          await recomputeVisibilityAndRender();
+          if (viewMode === "night") drawNightChart();
+          if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+          updateCaption();
+        } catch (err) {
+          HORIZON_PROFILE = null;
+          HORIZON_MODE = "numeric";
+          updateHorizonStatus();
+          alert(`Could not load horizon file:\n${err?.message || err}`);
+        }
       });
     }
 
@@ -2257,8 +2589,10 @@
       setViewMode("night");
 
       updateFovLabels();
+      updateHorizonStatus();
       updateCaption();
       drawNightChart();
     })();
   </script>
 </body>
+</html>
