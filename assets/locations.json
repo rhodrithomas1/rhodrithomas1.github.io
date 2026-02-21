@@ -1,0 +1,44 @@
+[
+  {
+    "latitude": 51.5463056,
+    "longitude": -3.6137222,
+    "name": "Bridgend, South Wales, UK",
+    "timezone": "Europe/London"
+  },
+  {
+    "latitude": 36.7213,
+    "longitude": -4.4214,
+    "name": "Málaga, Spain",
+    "timezone": "Europe/Madrid"
+  },
+  {
+    "latitude": -33.8688,
+    "longitude": 151.2093,
+    "name": "Sydney, Australia",
+    "timezone": "Australia/Sydney"
+  },
+  {
+    "latitude": -33.4489,
+    "longitude": -70.6693,
+    "name": "Santiago, Chile",
+    "timezone": "America/Santiago"
+  },
+  {
+    "latitude": 35.1983,
+    "longitude": -111.6513,
+    "name": "Flagstaff, USA",
+    "timezone": "America/Phoenix"
+  },
+  {
+    "latitude": 28.758,
+    "longitude": -17.905,
+    "name": "La Palma, Spain",
+    "timezone": "Atlantic/Canary"
+  },
+  {
+    "latitude": 36.83,
+    "longitude": -4.25,
+    "name": "Málaga Observatory",
+    "timezone": "Europe/Madrid"
+  }
+]

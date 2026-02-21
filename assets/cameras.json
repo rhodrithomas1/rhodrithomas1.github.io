@@ -1,0 +1,15 @@
+[
+  { "name": "Seestar S30 (IMX662)", "pixel_um": 2.9, "res_x": 1920, "res_y": 1080, "sensor_h_mm": 3.2, "sensor_w_mm": 5.6 },
+  { "name": "Seestar S50 (IMX462)", "pixel_um": 2.9, "res_x": 1920, "res_y": 1080, "sensor_h_mm": 3.2, "sensor_w_mm": 5.6 },
+  { "name": "Seestar S30 Pro (IMX585)", "pixel_um": 2.9, "res_x": 3840, "res_y": 2160, "sensor_h_mm": 6.3, "sensor_w_mm": 11.2 },
+
+  { "name": "Vaonis Vespera II (IMX585)", "pixel_um": 2.9, "res_x": 3840, "res_y": 2160, "sensor_h_mm": 6.3, "sensor_w_mm": 11.2 },
+  { "name": "Vaonis Vespera Pro (IMX676)", "pixel_um": 2.0, "res_x": 3536, "res_y": 3536, "sensor_h_mm": 7.0, "sensor_w_mm": 7.0 },
+
+  { "name": "DWARF 3 (IMX678)", "pixel_um": 2.0, "res_x": 3840, "res_y": 2160, "sensor_h_mm": 4.3, "sensor_w_mm": 7.7 },
+  { "name": "DWARF Mini (IMX662)", "pixel_um": 2.9, "res_x": 1920, "res_y": 1080, "sensor_h_mm": 3.2, "sensor_w_mm": 5.6 },
+
+  { "name": "ZWO ASI533MM", "pixel_um": 3.76, "res_x": 3008, "res_y": 3008, "sensor_h_mm": 11.31, "sensor_w_mm": 11.31 },
+  { "name": "ZWO ASI2600MC", "pixel_um": 3.76, "res_x": 6248, "res_y": 4176, "sensor_h_mm": 15.6, "sensor_w_mm": 23.5 },
+  { "name": "ZWO ASI1600MM", "pixel_um": 3.8, "res_x": 4656, "res_y": 3520, "sensor_h_mm": 13.4, "sensor_w_mm": 17.7 }
+]
