@@ -338,7 +338,10 @@
 
       .table-scroll{ max-height: 32vh; }
 
-      /* Hide less important cols on small screens */
+      /* Hide less important cols on small screens:
+         - Common Name (merged into Name)
+         - Subtype (requested)
+      */
       thead th:nth-child(2), tbody td:nth-child(2),
       thead th:nth-child(6), tbody td:nth-child(6){
         display:none;
@@ -380,7 +383,6 @@
         <div class="card">
           <div class="card-head">
             <div class="status">Planner Setup</div>
-            <div class="muted">Choose location + rig + horizon</div>
           </div>
 
           <div style="padding:12px;">
@@ -434,7 +436,7 @@
                 </select>
               </div>
 
-              <!-- ✅ These rows can be hidden on mobile when a smart scope is selected -->
+              <!-- ✅ Hidden on phone when smart scope selected -->
               <div class="form-row" id="reducerRow">
                 <label for="reducerSelect">Reducer / Barlow</label>
                 <select id="reducerSelect">
@@ -634,9 +636,6 @@
 
     let SELECTED_DATE_ISO = null;
 
-    // -----------------------------
-    // Responsive helpers
-    // -----------------------------
     function isMobileNarrow(){ return window.matchMedia("(max-width: 600px)").matches; }
     function isPhoneLike(){ return window.matchMedia("(max-width: 900px)").matches; }
     function enforceMobileAltAz(){
@@ -645,9 +644,6 @@
       $("gridEqu").checked = false;
     }
 
-    // -----------------------------
-    // Date helpers
-    // -----------------------------
     function pad2(n){ return String(n).padStart(2, "0"); }
     function ymdToIso(y,m,d){ return `${y}-${pad2(m)}-${pad2(d)}`; }
 
@@ -728,9 +724,6 @@
       updateCaption();
     }
 
-    // -----------------------------
-    // View switching
-    // -----------------------------
     function setViewMode(mode) {
       viewMode = mode;
 
@@ -783,9 +776,6 @@
       updateCaption();
     }
 
-    // -----------------------------
-    // Small helpers
-    // -----------------------------
     function url(rel) { return new URL(rel, window.location.href); }
 
     async function fetchJson(relPath) {
@@ -836,9 +826,6 @@
       return Number.isFinite(n) ? n.toFixed(2) : "—";
     }
 
-    // -----------------------------
-    // Horizon profile parsing (comma / csv / tab / space)
-    // -----------------------------
     function normalizeAz360ForInput(az) {
       const eps = 1e-9;
       if (!Number.isFinite(az)) return NaN;
@@ -1021,9 +1008,6 @@
       rebuildHorizonSelectOptions();
     }
 
-    // -----------------------------
-    // Smart scope helpers
-    // -----------------------------
     function isSmartTelescope(scope) {
       const n = (scope?.name ?? "").toLowerCase();
       return !!scope?.is_smart || !!scope?.isSmart || !!scope?.smart ||
@@ -1043,10 +1027,8 @@
 
       const reducerRow = $("reducerRow");
       const cameraRow  = $("cameraRow");
-
       if (!reducerRow || !cameraRow) return;
 
-      // ✅ Only hide on "mobile versions" (phone-like widths)
       if (isPhoneLike() && smart) {
         reducerRow.style.display = "none";
         cameraRow.style.display = "none";
@@ -1152,9 +1134,6 @@
       return Number.isFinite(idx) ? REDUCERS[idx] : REDUCERS[0];
     }
 
-    // -----------------------------
-    // Type filter dropdown
-    // -----------------------------
     function buildTypeFilterOptions() {
       const sel = $("typeFilter");
       if (!sel || !Array.isArray(OBJECTS)) return;
@@ -1190,9 +1169,6 @@
       return sel ? sel.value : "__all__";
     }
 
-    // -----------------------------
-    // Sun times + night window (NOAA-style)
-    // -----------------------------
     function clamp360(deg) {
       let x = deg % 360;
       if (x < 0) x += 360;
@@ -1362,9 +1338,6 @@
       return false;
     }
 
-    // -----------------------------
-    // Alt/Az + visibility
-    // -----------------------------
     function jdFromDate(date) {
       return (date.getTime() / 86400000) + 2440587.5;
     }
@@ -1572,9 +1545,6 @@
       return results;
     }
 
-    // -----------------------------
-    // Pixel size filtering
-    // -----------------------------
     function getObjectArcmin(o) {
       const aRaw = o?.size_major_arcmin;
       const bRaw = o?.size_minor_arcmin;
@@ -1642,9 +1612,6 @@
       }
     }
 
-    // -----------------------------
-    // Table sorting & rendering
-    // -----------------------------
     function formatSize(o) {
       const { major, minor } = getObjectArcmin(o);
       if (major > 0) {
@@ -1728,6 +1695,13 @@
       return (sortState.dir === "asc") ? cmp : -cmp;
     }
 
+    function formatMobileMergedName(o){
+      const n = safe(o?.name);
+      const cn = String(o?.common_name ?? "").trim();
+      if (isMobileNarrow() && cn) return `${n} (${cn})`;
+      return n;
+    }
+
     function renderObjectsTable() {
       const tbody = $("objectsTbody");
       tbody.innerHTML = "";
@@ -1742,7 +1716,7 @@
         if (idx === selectedObjectIdx) tr.classList.add("selected");
 
         tr.innerHTML = `
-          <td class="mono">${safe(o.name)}</td>
+          <td class="mono">${formatMobileMergedName(o)}</td>
           <td>${safe(o.common_name)}</td>
           <td>${formatMagnitude(o.magnitude)}</td>
           <td>${formatSize(o)}</td>
@@ -1784,27 +1758,6 @@
       updateCaption();
     }
 
-    function horizonModeLabel() {
-      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) return `custom (${HORIZON_PROFILE.filename})`;
-      return `${getHorizonFloorDeg()}°`;
-    }
-
-    function nightStatusLine(loc) {
-      const tz = NIGHT_WINDOW?.tz || loc?.timezone || "UTC";
-      const dateTxt = SELECTED_DATE_ISO ? formatSelectedDateForDisplay(loc) : "—";
-
-      // ✅ On mobile: remove sunset–sunrise line entirely
-      if (isMobileNarrow()) {
-        return `Date: ${dateTxt} • Horizon: ${horizonModeLabel()}`;
-      }
-
-      if (NIGHT_WINDOW?.startUtc && NIGHT_WINDOW?.endUtc) {
-        const r = formatTimeRangeLocal(NIGHT_WINDOW.startUtc.getTime(), NIGHT_WINDOW.endUtc.getTime(), tz);
-        return `Date: ${dateTxt} • Sunset–Sunrise: ${r} • Horizon: ${horizonModeLabel()}`;
-      }
-      return `Date: ${dateTxt} • Sunset–Sunrise: — • Horizon: ${horizonModeLabel()}`;
-    }
-
     async function recomputeVisibilityAndRender() {
       const loc = getSelected($("locationSelect"), LOCATIONS);
       updateDateUI();
@@ -1819,13 +1772,11 @@
       buildTypeFilterOptions();
       refreshTableOnly();
 
+      // ✅ Removed the whole "Date: … Sunset–Sunrise: … Horizon: …" line (all versions)
       $("objectsStatus").textContent =
-        `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} • ${nightStatusLine(loc)} • sorted by ${sortLabel()}`;
+        `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} • sorted by ${sortLabel()}`;
     }
 
-    // -----------------------------
-    // FoV labels (ONLY degrees + arcminutes)
-    // -----------------------------
     function calcFovDegrees(sensor_mm, focal_mm) {
       return (2 * Math.atan(sensor_mm / (2 * focal_mm))) * DEG;
     }
@@ -1877,16 +1828,6 @@
       if (mosEl)  mosEl.textContent = ` • FoV: ${formatDegArcmin(mosaicFovDeg)}`;
     }
 
-    function getRigInfo() {
-      const scope = getSelected($("telescopeSelect"), TELESCOPES);
-      const scopeName = scope?.name ? String(scope.name) : "—";
-      const fov = computeRigFovDeg();
-      return { scopeName, fovDeg: fov };
-    }
-
-    // -----------------------------
-    // Caption helpers
-    // -----------------------------
     function getSelectedObjectSafe() {
       if (selectedObjectIdx == null) return null;
       return OBJECTS?.[selectedObjectIdx] ?? null;
@@ -1916,8 +1857,6 @@
       const maxAlt = (vis && vis.maxAltDeg != null) ? vis.maxAltDeg : null;
 
       const desktopLine = `Sunset–Sunrise: <code>${sunsetSunrise}</code> • Total: <code>${visH.toFixed(2)}h</code> • Best window: <code>${bestWindow}</code>${maxAlt != null ? ` • Max altitude: <code>${maxAlt.toFixed(1)}°</code>` : ""}`;
-
-      // ✅ Mobile: remove sunset–sunrise line entirely
       const mobileLine = `Total: <code>${visH.toFixed(2)}h</code> • Best window: <code>${bestWindow}</code>${maxAlt != null ? ` • Max altitude: <code>${maxAlt.toFixed(1)}°</code>` : ""}`;
 
       return { desktopLine, mobileLine };
@@ -1936,14 +1875,10 @@
       return `Sky Image (Aladin): <code>${safe(surveyLabel)}</code> • Center: RA <code>${raTxt}</code>, Dec <code>${decTxt}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>`;
     }
 
-    // -----------------------------
-    // Unified caption (all modes)
-    // -----------------------------
     function updateCaption() {
       const cap = $("chartCaption");
       const loc = getSelected($("locationSelect"), LOCATIONS);
       const obj = getSelectedObjectSafe();
-      const { scopeName, fovDeg } = getRigInfo();
 
       if (!loc || !obj) {
         if (viewMode === "image") cap.textContent = "Sky Image (Aladin): select an object to view its field.";
@@ -1960,26 +1895,18 @@
       const isMob = isMobileNarrow();
 
       if (viewMode === "night") {
-        // ✅ Remove this from ALL versions: "Tonight’s Visibility • <date> • <object>"
-        // Desktop keeps legend + sunset/sunrise; Mobile removes legend + sunset/sunrise.
         const legendLine = `Day=yellow / Night=blue • Current position=red • Meridian=green • Horizon limit=${horizonLabel}`;
 
         if (isMob) {
           cap.innerHTML = `
             <div><strong>${getObjectDisplayName(obj)}</strong></div>
             <div style="margin-top:4px;">${lines.mobileLine}</div>
-            <div class="muted" style="margin-top:6px;">
-              Rig: <code>${safe(scopeName)}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>
-            </div>
           `;
         } else {
           cap.innerHTML = `
             <div class="muted">${legendLine}</div>
             <div style="margin-top:6px;"><strong>${getObjectDisplayName(obj)}</strong></div>
             <div style="margin-top:4px;">${lines.desktopLine}</div>
-            <div class="muted" style="margin-top:6px;">
-              Rig: <code>${safe(scopeName)}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>
-            </div>
           `;
         }
         return;
@@ -1993,18 +1920,12 @@
             <div><strong>${topLine}</strong></div>
             <div style="margin-top:6px;"><strong>${getObjectDisplayName(obj)}</strong></div>
             <div style="margin-top:4px;">${lines.mobileLine}</div>
-            <div class="muted" style="margin-top:6px;">
-              Rig: <code>${safe(scopeName)}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>
-            </div>
           `;
         } else {
           cap.innerHTML = `
             <div><strong>${topLine}</strong></div>
             <div style="margin-top:6px;"><strong>${getObjectDisplayName(obj)}</strong></div>
             <div style="margin-top:4px;">${lines.desktopLine}</div>
-            <div class="muted" style="margin-top:6px;">
-              Rig: <code>${safe(scopeName)}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>
-            </div>
           `;
         }
         return;
@@ -2031,15 +1952,9 @@
         <div class="muted" style="margin-top:4px;">
           Tip: click a month bar to jump Tonight’s Visibility to the mid-month sample date.
         </div>
-        <div class="muted" style="margin-top:6px;">
-          Rig: <code>${safe(scopeName)}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>
-        </div>
       `;
     }
 
-    // -----------------------------
-    // Canvas drawing
-    // -----------------------------
     function prepareCanvas(canvas, minCssH) {
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
@@ -2081,7 +1996,6 @@
     }
 
     function getGridMode(){
-      // ✅ Mobile always Alt-Az
       if (isMobileNarrow()) return "altaz";
       return $("gridEqu").checked ? "equ" : "altaz";
     }
@@ -2263,11 +2177,8 @@
         drawEquatorialGrid(ctx, loc, new Date(midMs), cx, cy, radiusMax);
       }
 
-      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
-        drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
-      } else {
-        drawNumericHorizonCircle(ctx, cx, cy, radiusMax, getHorizonFloorDeg());
-      }
+      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
+      else drawNumericHorizonCircle(ctx, cx, cy, radiusMax, getHorizonFloorDeg());
 
       const sunsetMs = NIGHT_WINDOW.startUtc.getTime();
       const sunriseMs = NIGHT_WINDOW.endUtc.getTime();
@@ -2322,7 +2233,6 @@
         strokeSegment(A, B, col);
       }
 
-      // current position marker (only if above horizon)
       {
         const now = Date.now();
         const { altDeg, azDeg } = raDecToAltAz(new Date(now), raDeg, decDeg, latDeg, lonDeg);
@@ -2339,9 +2249,6 @@
       }
     }
 
-    // -----------------------------
-    // Monthly visibility
-    // -----------------------------
     function computeYearIfPossible() {
       const loc = getSelected($("locationSelect"), LOCATIONS);
       if (!loc || selectedObjectIdx == null || !OBJECTS[selectedObjectIdx]) { YEAR_DATA = null; return; }
@@ -2458,9 +2365,6 @@
       ctx.fillText(`Max: ${maxH.toFixed(2)}h`, right - 110, 20);
     }
 
-    // -----------------------------
-    // Aladin integration (Image mode)
-    // -----------------------------
     function initAladinIfNeeded() {
       if (aladin || aladinInitStarted) return;
 
@@ -2515,9 +2419,6 @@
       aladinSetFovDeg(computeRigFovDeg());
     }
 
-    // -----------------------------
-    // Wiring
-    // -----------------------------
     function wireTableClick() {
       const tbody = $("objectsTbody");
       tbody.addEventListener("click", (e) => {
@@ -2556,10 +2457,7 @@
         }
 
         refreshTableOnly();
-
-        const loc = getSelected($("locationSelect"), LOCATIONS);
-        $("objectsStatus").textContent =
-          `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} • ${nightStatusLine(loc)} • sorted by ${sortLabel()}`;
+        $("objectsStatus").textContent = `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} • sorted by ${sortLabel()}`;
       });
     }
 
@@ -2574,6 +2472,8 @@
           else if (viewMode === "year") drawYearChart();
           else updateAladinFromSelection(false);
           updateCaption();
+          // re-render table so merged name updates immediately when crossing 600px breakpoint
+          renderObjectsTable();
         }, 140);
       });
 
@@ -2604,9 +2504,7 @@
     function wireTypeFilter(){
       $("typeFilter").addEventListener("change", () => {
         refreshTableOnly();
-        const loc = getSelected($("locationSelect"), LOCATIONS);
-        $("objectsStatus").textContent =
-          `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} • ${nightStatusLine(loc)} • sorted by ${sortLabel()}`;
+        $("objectsStatus").textContent = `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} • sorted by ${sortLabel()}`;
       });
     }
 
@@ -2662,9 +2560,6 @@
       });
     }
 
-    // -----------------------------
-    // Load JSONs
-    // -----------------------------
     async function loadAllJson() {
       try {
         const data = await fetchJson("assets/locations.json");
