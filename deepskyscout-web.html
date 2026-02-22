@@ -15,16 +15,23 @@
     .planner-layout{
       display:grid;
       grid-template-columns: minmax(620px, 860px) 1fr;
+      grid-template-areas: "left right";
       gap: 24px;
       align-items: start;
       margin-top: 14px;
     }
-    @media (max-width: 1100px){
-      .planner-layout{ grid-template-columns: 1fr; }
-    }
+    .left-panel{ grid-area: left; min-width: 0; }
+    .right-panel{ grid-area: right; min-width: 0; }
 
-    .left-panel{ min-width: 0; }
-    .right-panel{ min-width: 0; }
+    @media (max-width: 1100px){
+      /* ✅ Mobile/Tablet: show the CHART first, then the controls/table */
+      .planner-layout{
+        grid-template-columns: 1fr;
+        grid-template-areas:
+          "right"
+          "left";
+      }
+    }
 
     .card{
       border-radius:14px;
@@ -56,7 +63,7 @@
       gap:10px;
       align-items:center;
       flex:0 0 auto;
-      min-width: 420px; /* keeps layout stable */
+      min-width: 420px; /* desktop stability */
       flex-wrap:wrap;
     }
     .chart-middle{
@@ -112,7 +119,7 @@
       background:rgba(255,255,255,.12);
       margin:0 2px;
     }
-    .night-only{ display:inline-flex; } /* grid toggles only for Tonight view */
+    .night-only{ display:inline-flex; }
 
     .form-grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
     @media (min-width:800px){.form-grid{grid-template-columns:1fr 1fr}}
@@ -194,6 +201,7 @@
       border: 1px solid rgba(255,255,255,.10);
       background: rgba(0,0,0,.18);
     }
+    #yearCanvas{ cursor:pointer; }
 
     /* Aladin pane */
     #aladinDiv{
@@ -232,6 +240,103 @@
     .refs ul{ margin: 8px 0 0 18px; padding: 0; }
     .refs li{ margin: 6px 0; }
     .refs a{ color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+
+    /* --- Date controls next to Tonight title --- */
+    #chartTitle{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+    #chartTitleText{ font-weight:600; }
+
+    .date-nav{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      margin-left:4px;
+    }
+    .date-btn, .date-pill{
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.15);
+      background:rgba(0,0,0,.22);
+      color:inherit;
+      cursor:pointer;
+      user-select:none;
+      line-height:1;
+    }
+    .date-btn{
+      padding:6px 10px;
+      font-size: 1rem;
+      opacity:.95;
+    }
+    .date-pill{
+      padding:6px 10px;
+      font-size:.92rem;
+      white-space:nowrap;
+      opacity:.95;
+    }
+    .date-btn:hover, .date-pill:hover{
+      background:rgba(255,255,255,.07);
+    }
+
+    /* --- Table scroll wrapper (easy to tune for mobile) --- */
+    .table-scroll{
+      max-height: 520px;
+      overflow:auto;
+    }
+
+    /* ✅ Phone optimisation */
+    @media (max-width: 600px){
+      .container.planner-container{
+        margin: 0 12px 44px 12px;
+      }
+
+      .planner-layout{
+        gap: 14px;
+      }
+
+      /* Stack the chart header controls nicely */
+      .chart-toggles{
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .chart-left, .chart-middle, .chart-right{
+        min-width: 0 !important;
+        width: 100%;
+        justify-content: flex-start;
+      }
+      .chart-right{
+        justify-content: stretch;
+      }
+      .chart-right select{
+        max-width: none;
+        width: 100%;
+      }
+
+      /* Make table less overwhelming */
+      .table-scroll{
+        max-height: 320px; /* smaller on phones */
+      }
+
+      table{ font-size: .90rem; }
+      thead th, tbody td{
+        padding: 8px 9px;
+      }
+
+      /* Remove inline min-width constraints on headers for small screens */
+      thead th{ min-width: 0 !important; }
+
+      /* Optional: hide less important columns on small screens (keeps table readable) */
+      thead th:nth-child(2), tbody td:nth-child(2),  /* Common Name */
+      thead th:nth-child(6), tbody td:nth-child(6){  /* Subtype */
+        display:none;
+      }
+
+      /* Slightly smaller Aladin on phones */
+      #aladinDiv{ height: 460px; }
+    }
   </style>
 </head>
 
@@ -336,7 +441,7 @@
             <div class="muted">Click a row to select • Click headers to sort</div>
           </div>
 
-          <div style="max-height: 520px; overflow:auto;">
+          <div class="table-scroll">
             <table>
               <thead>
                 <tr>
@@ -372,7 +477,16 @@
       <div class="right-panel">
         <div class="card">
           <div class="card-head">
-            <div class="status" id="chartTitle">Tonight’s Visibility</div>
+            <div class="status" id="chartTitle">
+              <span id="chartTitleText">Tonight’s Visibility</span>
+
+              <span class="date-nav night-only" id="dateNav" title="Change the date for Tonight’s Visibility">
+                <button class="date-btn" id="datePrev" type="button" aria-label="Previous day">‹</button>
+                <button class="date-pill" id="dateDisplay" type="button" title="Pick a date">—</button>
+                <button class="date-btn" id="dateNext" type="button" aria-label="Next day">›</button>
+                <input id="datePicker" type="date" style="display:none;" />
+              </span>
+            </div>
 
             <div class="chart-toggles">
               <div class="chart-left">
@@ -403,7 +517,6 @@
                 </label>
               </div>
 
-              <!-- Survey dropdown: ONLY shown in Image mode -->
               <div class="chart-right" id="surveyWrap" style="display:none;">
                 <label for="surveySelect">Survey</label>
                 <select id="surveySelect">
@@ -417,17 +530,14 @@
           </div>
 
           <div class="chart-body">
-            <!-- Night -->
             <div id="nightPane">
               <canvas id="skyCanvas"></canvas>
             </div>
 
-            <!-- Image -->
             <div id="imagePane" style="display:none;">
               <div id="aladinDiv"></div>
             </div>
 
-            <!-- Year -->
             <div id="yearPane" style="display:none;">
               <canvas id="yearCanvas"></canvas>
             </div>
@@ -448,7 +558,6 @@
   <!-- Aladin Lite v3 -->
   <script type="text/javascript" src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js" charset="utf-8"></script>
 
-  <!-- ✅ Full script kept (this is the version that loads JSONs) -->
   <script>
     const $ = (id) => document.getElementById(id);
 
@@ -476,6 +585,7 @@
 
     // Monthly state
     let YEAR_DATA = null;             // { year, months:[mins], maxAltByMonth:[deg|null], currentMonthIdx }
+    let YEAR_BAR_HITBOXES = [];       // [{idx, x, w, top, bottom}...]
 
     const loadState = {
       locations: { ok: false, err: "" },
@@ -497,6 +607,92 @@
     let HORIZON_MODE = "numeric";     // "numeric" | "custom"
     let LAST_NUMERIC_HORIZON_DEG = 20;
 
+    // Selected date for Tonight view (ISO YYYY-MM-DD, interpreted as the *location's* local date)
+    let SELECTED_DATE_ISO = null;
+
+    // -----------------------------
+    // Date helpers
+    // -----------------------------
+    function pad2(n){ return String(n).padStart(2, "0"); }
+    function ymdToIso(y,m,d){ return `${y}-${pad2(m)}-${pad2(d)}`; }
+
+    function parseIsoYmd(iso){
+      const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return null;
+      return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+    }
+
+    function isoAddDays(iso, deltaDays){
+      const ymd = parseIsoYmd(iso);
+      if (!ymd) return iso;
+      const t = Date.UTC(ymd.y, ymd.m - 1, ymd.d) + (deltaDays * 86400000);
+      const dt = new Date(t);
+      return ymdToIso(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+    }
+
+    function isoToNoonUtcDate(iso){
+      const ymd = parseIsoYmd(iso);
+      if (!ymd) return new Date();
+      return new Date(Date.UTC(ymd.y, ymd.m - 1, ymd.d, 12, 0, 0));
+    }
+
+    function getCurrentLocation(){
+      if (!LOCATIONS?.length) return null;
+      const idx = Number.parseInt($("locationSelect").value, 10);
+      if (Number.isFinite(idx) && LOCATIONS[idx]) return LOCATIONS[idx];
+      return LOCATIONS[0] || null;
+    }
+
+    function getBaseYmdForLocation(loc){
+      const tz = loc?.timezone || "UTC";
+      if (SELECTED_DATE_ISO) {
+        const ymd = parseIsoYmd(SELECTED_DATE_ISO);
+        if (ymd) return ymd;
+      }
+      const ymdNow = getZonedYMD(new Date(), tz);
+      SELECTED_DATE_ISO = ymdToIso(ymdNow.y, ymdNow.m, ymdNow.d);
+      return ymdNow;
+    }
+
+    function formatSelectedDateForDisplay(loc){
+      const tz = loc?.timezone || "UTC";
+      const iso = SELECTED_DATE_ISO || ymdToIso(getZonedYMD(new Date(), tz).y, getZonedYMD(new Date(), tz).m, getZonedYMD(new Date(), tz).d);
+      const dt = isoToNoonUtcDate(iso);
+      const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday:"short", day:"2-digit", month:"short", year:"numeric" });
+      return fmt.format(dt);
+    }
+
+    function updateDateUI(){
+      const loc = getCurrentLocation();
+      const disp = $("dateDisplay");
+      const picker = $("datePicker");
+      if (!loc || !disp || !picker) return;
+
+      getBaseYmdForLocation(loc);
+      disp.textContent = formatSelectedDateForDisplay(loc);
+      picker.value = SELECTED_DATE_ISO || "";
+    }
+
+    async function setSelectedDateIso(newIso, { switchToNight = true } = {}){
+      const ymd = parseIsoYmd(newIso);
+      if (!ymd) return;
+
+      SELECTED_DATE_ISO = newIso;
+      updateDateUI();
+
+      if (switchToNight) {
+        $("viewNight").checked = true;
+        setViewMode("night");
+      }
+
+      await recomputeVisibilityAndRender();
+
+      if (viewMode === "night") drawNightChart();
+      if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+      if (viewMode === "image") updateAladinFromSelection(true);
+      updateCaption();
+    }
+
     // -----------------------------
     // View switching
     // -----------------------------
@@ -509,7 +705,7 @@
 
       const nightOnly = document.querySelectorAll(".night-only");
       const surveyWrap = $("surveyWrap");
-      const chartTitle = $("chartTitle");
+      const chartTitleText = $("chartTitleText");
 
       if (mode === "night") {
         nightPane.style.display = "";
@@ -518,7 +714,8 @@
         nightOnly.forEach(el => el.style.display = "inline-flex");
         $("sepNight").style.display = "inline-flex";
         surveyWrap.style.display = "none";
-        chartTitle.textContent = "Tonight’s Visibility";
+        chartTitleText.textContent = "Tonight’s Visibility";
+        updateDateUI();
         drawNightChart();
         updateCaption();
         return;
@@ -531,21 +728,20 @@
         nightOnly.forEach(el => el.style.display = "none");
         $("sepNight").style.display = "none";
         surveyWrap.style.display = "flex";
-        chartTitle.textContent = "Sky Image (Aladin)";
+        chartTitleText.textContent = "Sky Image (Aladin)";
         initAladinIfNeeded();
         updateCaption();
         setTimeout(() => updateAladinFromSelection(true), 60);
         return;
       }
 
-      // monthly
       nightPane.style.display = "none";
       imagePane.style.display = "none";
       yearPane.style.display  = "";
       nightOnly.forEach(el => el.style.display = "none");
       $("sepNight").style.display = "none";
       surveyWrap.style.display = "none";
-      chartTitle.textContent = "Monthly Visibility";
+      chartTitleText.textContent = "Monthly Visibility";
       computeYearIfPossible();
       drawYearChart();
       updateCaption();
@@ -593,7 +789,6 @@
 
     function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
 
-    // --- Magnitude: treat ""/null/undefined/non-numeric as unknown (NOT 0) ---
     function parseMagnitude(val) {
       if (val === null || val === undefined) return NaN;
       if (typeof val === "string" && val.trim() === "") return NaN;
@@ -666,17 +861,12 @@
 
       pts.sort((a,b) => a.az - b.az);
 
-      // dedupe by az (keep last)
       const dedup = [];
       for (const p of pts) {
-        if (dedup.length && Math.abs(dedup[dedup.length - 1].az - p.az) < 1e-9) {
-          dedup[dedup.length - 1] = p;
-        } else {
-          dedup.push(p);
-        }
+        if (dedup.length && Math.abs(dedup[dedup.length - 1].az - p.az) < 1e-9) dedup[dedup.length - 1] = p;
+        else dedup.push(p);
       }
 
-      // Ensure 0 and 360 exist and match (close loop)
       let has0 = dedup.length && Math.abs(dedup[0].az - 0) < 1e-9;
       let has360 = dedup.length && Math.abs(dedup[dedup.length - 1].az - 360) < 1e-9;
 
@@ -725,7 +915,6 @@
       if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
         return (az) => {
           const v = customHorizonAltAtAz(az);
-          // standalone custom; if weird input, fall back to 0° (not the numeric floor)
           return Number.isFinite(v) ? v : 0;
         };
       }
@@ -775,10 +964,8 @@
       clearOpt.disabled = !HORIZON_PROFILE;
       sel.appendChild(clearOpt);
 
-      // selection
-      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
-        sel.value = "__custom__";
-      } else {
+      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) sel.value = "__custom__";
+      else {
         sel.value = String(LAST_NUMERIC_HORIZON_DEG);
         if (![...sel.options].some(o => o.value === sel.value)) sel.value = "20";
       }
@@ -917,8 +1104,8 @@
       if (!sel || !Array.isArray(OBJECTS)) return;
 
       const prev = sel.value || "__all__";
-
       const types = new Set();
+
       for (const o of OBJECTS) {
         const t = String(o?.type ?? "").trim();
         if (t) types.add(t);
@@ -1040,7 +1227,6 @@
       return fmt.format(dateUtc);
     }
 
-    // ---- Time-range formatting: adds "(+1d)" when end is on later local day
     function dayIndexFromYmd(ymd){
       return Math.floor(Date.UTC(ymd.y, ymd.m - 1, ymd.d) / 86400000);
     }
@@ -1081,26 +1267,25 @@
     }
 
     function buildNightWindowUtc(location){
-      const tz = location.timezone;
-      const { y, m, d } = getZonedYMD(new Date(), tz);
-      return buildNightWindowUtcForYMD(location, y, m, d);
+      const ymd = getBaseYmdForLocation(location);
+      return buildNightWindowUtcForYMD(location, ymd.y, ymd.m, ymd.d);
     }
 
     function buildDaySpansUtc(location){
-      const tz = location.timezone;
-      const { y, m, d } = getZonedYMD(new Date(), tz);
       const lat = Number(location.latitude);
       const lon = Number(location.longitude);
+
+      const base = getBaseYmdForLocation(location);
+      const baseUtc = new Date(Date.UTC(base.y, base.m-1, base.d, 0, 0, 0));
 
       function ymdFromUtcDate(utcDate){
         return { y: utcDate.getUTCFullYear(), m: utcDate.getUTCMonth()+1, d: utcDate.getUTCDate() };
       }
 
-      const base = new Date(Date.UTC(y, m-1, d, 0, 0, 0));
       const dates = [
-        new Date(base.getTime() - 86400000),
-        base,
-        new Date(base.getTime() + 86400000)
+        new Date(baseUtc.getTime() - 86400000),
+        baseUtc,
+        new Date(baseUtc.getTime() + 86400000)
       ];
 
       const spans = [];
@@ -1199,7 +1384,6 @@
       return { altDeg, azDeg };
     }
 
-    // Standalone horizon: uses ONLY numeric floor OR ONLY custom profile (no stacking)
     function computeVisibilityForObjectInWindow(location, horizonAtAzFn, raDeg, decDeg, startUtc, endUtc){
       const latDeg = Number(location.latitude);
       const lonDeg = Number(location.longitude);
@@ -1366,7 +1550,7 @@
       const px = Number(cam.pixel_um);
       if (!Number.isFinite(effFocal) || effFocal <= 0 || !Number.isFinite(px) || px <= 0) return null;
 
-      return 206.265 * px / effFocal; // arcsec / pixel (internal only)
+      return 206.265 * px / effFocal;
     }
 
     function objectPixelsMajor(o, scaleArcsecPerPx) {
@@ -1458,9 +1642,7 @@
         const ra = Math.round(VIS_RESULTS.get(a)?.visibleSec ?? 0);
         const rb = Math.round(VIS_RESULTS.get(b)?.visibleSec ?? 0);
 
-        if (ra !== rb) {
-          return (sortState.dir === "asc") ? (ra - rb) : (rb - ra);
-        }
+        if (ra !== rb) return (sortState.dir === "asc") ? (ra - rb) : (rb - ra);
 
         const aa = VIS_RESULTS.get(a)?.avgAltDeg;
         const ab = VIS_RESULTS.get(b)?.avgAltDeg;
@@ -1559,13 +1741,15 @@
       const tz = NIGHT_WINDOW?.tz || loc?.timezone || "UTC";
       if (NIGHT_WINDOW?.startUtc && NIGHT_WINDOW?.endUtc) {
         const r = formatTimeRangeLocal(NIGHT_WINDOW.startUtc.getTime(), NIGHT_WINDOW.endUtc.getTime(), tz);
-        return `Sunset–Sunrise: ${r} • Horizon: ${horizonModeLabel()}`;
+        const dateTxt = SELECTED_DATE_ISO ? formatSelectedDateForDisplay(loc) : "—";
+        return `Date: ${dateTxt} • Sunset–Sunrise: ${r} • Horizon: ${horizonModeLabel()}`;
       }
       return "Sunset–Sunrise: —";
     }
 
     async function recomputeVisibilityAndRender() {
       const loc = getSelected($("locationSelect"), LOCATIONS);
+      updateDateUI();
 
       $("objectsStatus").textContent = "⏳ Calculating visibility…";
       $("objectsTbody").innerHTML = `<tr><td colspan="7" class="muted" style="padding:12px;">Calculating…</td></tr>`;
@@ -1622,7 +1806,7 @@
 
     function updateFovLabels(){
       const minPx = Math.max(0, Number($("minPixelsInput").value || 0));
-      const scaleArcsecPerPx = computeImageScaleArcsecPerPixel(); // internal arcsec/px
+      const scaleArcsecPerPx = computeImageScaleArcsecPerPixel();
       const minDeg = Number.isFinite(scaleArcsecPerPx) ? (minPx * scaleArcsecPerPx / 3600) : NaN;
 
       const mosaic = Number($("mosaicRange").value) || 1;
@@ -1692,9 +1876,6 @@
       return `Sky Image (Aladin): <code>${safe(surveyLabel)}</code> • Center: RA <code>${raTxt}</code>, Dec <code>${decTxt}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>`;
     }
 
-    // -----------------------------
-    // Unified caption (all modes)
-    // -----------------------------
     function updateCaption() {
       const cap = $("chartCaption");
       const loc = getSelected($("locationSelect"), LOCATIONS);
@@ -1702,19 +1883,17 @@
       const { scopeName, fovDeg } = getRigInfo();
 
       if (!loc || !obj) {
-        if (viewMode === "image") {
-          cap.textContent = "Sky Image (Aladin): select an object to view its field.";
-        } else if (viewMode === "year") {
-          cap.textContent = "Monthly Visibility: select an object to compute monthly totals.";
-        } else {
-          cap.textContent = "Select an object to view: Tonight’s Visibility, Sky Image (Aladin), or Monthly Visibility.";
-        }
+        if (viewMode === "image") cap.textContent = "Sky Image (Aladin): select an object to view its field.";
+        else if (viewMode === "year") cap.textContent = "Monthly Visibility: select an object to compute monthly totals.";
+        else cap.textContent = "Select an object to view: Tonight’s Visibility, Sky Image (Aladin), or Monthly Visibility.";
         return;
       }
 
       const horizonLabel = (HORIZON_MODE === "custom" && HORIZON_PROFILE)
         ? `custom (${safe(HORIZON_PROFILE.filename)})`
         : `${getHorizonFloorDeg()}°`;
+
+      const dateLabel = SELECTED_DATE_ISO ? formatSelectedDateForDisplay(loc) : "—";
 
       if (viewMode === "night") {
         const legendLine =
@@ -1725,7 +1904,7 @@
         cap.innerHTML = `
           <div class="muted">${legendLine}</div>
           <div style="margin-top:6px;">
-            <strong>Tonight’s Visibility</strong> • ${getObjectDisplayName(obj)}
+            <strong>Tonight’s Visibility</strong> • <span class="muted">${dateLabel}</span> • ${getObjectDisplayName(obj)}
           </div>
           <div style="margin-top:4px;">
             ${tonight.line}
@@ -1744,7 +1923,7 @@
         cap.innerHTML = `
           <div><strong>${topLine}</strong></div>
           <div style="margin-top:6px;">
-            <strong>Tonight’s Visibility</strong> • ${getObjectDisplayName(obj)}
+            <strong>Tonight’s Visibility</strong> • <span class="muted">${dateLabel}</span> • ${getObjectDisplayName(obj)}
           </div>
           <div style="margin-top:4px;">
             ${tonight.line}
@@ -1777,7 +1956,7 @@
           Year: <code>${YEAR_DATA.year}</code> • Best month (mid-month sample): <code>${bestLabel}</code> • Max: <code>${maxH.toFixed(2)}h</code>
         </div>
         <div class="muted" style="margin-top:4px;">
-          Computed using horizon limit <code>${horizonLabel}</code> and sunset→sunrise windows.
+          Tip: click a month bar to jump Tonight’s Visibility to the mid-month sample date.
         </div>
         <div class="muted" style="margin-top:6px;">
           Rig: <code>${safe(scopeName)}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>
@@ -1786,13 +1965,18 @@
     }
 
     // -----------------------------
-    // Tonight chart (canvas)
+    // Canvas drawing
     // -----------------------------
     function prepareCanvas(canvas, minCssH) {
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
       const cssW = rect.width;
-      const cssH = Math.max(minCssH, Math.floor(rect.width));
+
+      // ✅ Phone-friendly height cap so the chart doesn't dominate the screen
+      const isPhone = window.matchMedia("(max-width: 600px)").matches;
+      const maxH = isPhone ? 360 : 9999;
+      const desiredSquare = Math.floor(cssW);
+      const cssH = Math.min(maxH, Math.max(Math.min(minCssH, isPhone ? 300 : minCssH), desiredSquare));
 
       canvas.style.height = cssH + "px";
 
@@ -1885,7 +2069,6 @@
       for (let rah = 0; rah < 24; rah++) {
         const pts = [];
         let started = false;
-
         for (let dec = -80; dec <= 80; dec += 2) {
           const ra = rah * 15;
           const { altDeg, azDeg } = raDecToAltAz(refUtc, ra, dec, latDeg, lonDeg);
@@ -1997,25 +2180,10 @@
         drawEquatorialGrid(ctx, loc, new Date(midMs), cx, cy, radiusMax);
       }
 
-      // Horizon visualization: standalone (either circle OR custom curve)
       if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
         drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
-
-        const labelAz = 135;
-        const hAlt = horizonAtAzFn(labelAz);
-        const p = projectAltAz(hAlt, labelAz, cx, cy, radiusMax);
-        ctx.fillStyle = "rgba(160,200,140,0.95)";
-        ctx.font = "15px ui-sans-serif, system-ui";
-        ctx.fillText("Custom horizon", p.x + 10, p.y);
       } else {
-        const floorDeg = getHorizonFloorDeg();
-        drawNumericHorizonCircle(ctx, cx, cy, radiusMax, floorDeg);
-
-        const labelAz = 135;
-        const p = projectAltAz(floorDeg, labelAz, cx, cy, radiusMax);
-        ctx.fillStyle = "rgba(160,200,140,0.95)";
-        ctx.font = "15px ui-sans-serif, system-ui";
-        ctx.fillText("Horizon", p.x + 10, p.y);
+        drawNumericHorizonCircle(ctx, cx, cy, radiusMax, getHorizonFloorDeg());
       }
 
       const sunsetMs = NIGHT_WINDOW.startUtc.getTime();
@@ -2024,7 +2192,7 @@
       let trackStart = sunsetMs;
       let trackEnd = sunriseMs;
       const minSpan = 24*3600000;
-      let span = trackEnd - trackStart;
+      const span = trackEnd - trackStart;
 
       if (span < minSpan) {
         const extra = Math.floor((minSpan - span) / 2);
@@ -2045,9 +2213,6 @@
         const { altDeg, azDeg } = raDecToAltAz(new Date(trackEnd), raDeg, decDeg, latDeg, lonDeg);
         pts.push({ t: trackEnd, altDeg, azDeg });
       }
-
-      let best = null;
-      for (const p of pts) if (!best || p.altDeg > best.altDeg) best = p;
 
       function strokeSegment(p0, p1, color){
         const a0 = projectAltAz(p0.altDeg, p0.azDeg, cx, cy, radiusMax);
@@ -2074,46 +2239,6 @@
         strokeSegment(A, B, col);
       }
 
-      function markAt(ms, label, color){
-        const { altDeg, azDeg } = raDecToAltAz(new Date(ms), raDeg, decDeg, latDeg, lonDeg);
-        const hHere = horizonAtAzFn(azDeg);
-        const xy = projectAltAz(altDeg, azDeg, cx, cy, radiusMax);
-
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(xy.x, xy.y, 4.8, 0, Math.PI*2);
-        ctx.fill();
-
-        ctx.fillStyle = "rgba(255,255,255,0.88)";
-        ctx.font = "14px ui-sans-serif, system-ui";
-        const suffix = (altDeg < hHere) ? " (below horizon)" : "";
-        ctx.fillText(label + suffix, xy.x + 8, xy.y - 8);
-      }
-
-      if (sunsetMs >= trackStart && sunsetMs <= trackEnd) {
-        markAt(sunsetMs, `Sunset ${NIGHT_WINDOW.sunsetLocal || ""}`.trim(), "rgba(255,180,80,0.95)");
-      }
-      if (sunriseMs >= trackStart && sunriseMs <= trackEnd) {
-        markAt(sunriseMs, `Sunrise ${NIGHT_WINDOW.sunriseLocal || ""}`.trim(), "rgba(255,180,80,0.95)");
-      }
-
-      if (best) {
-        const tz = NIGHT_WINDOW.tz || loc.timezone || "UTC";
-        const tLabel = `T ${formatLocalHM(new Date(best.t), tz)}`;
-        const xy = projectAltAz(best.altDeg, best.azDeg, cx, cy, radiusMax);
-
-        ctx.fillStyle = "rgba(50,220,50,0.98)";
-        ctx.beginPath();
-        ctx.arc(xy.x, xy.y, 5.4, 0, Math.PI*2);
-        ctx.fill();
-
-        ctx.fillStyle = "rgba(50,220,50,0.98)";
-        ctx.font = "15px ui-sans-serif, system-ui";
-        const tw = ctx.measureText(tLabel).width;
-        ctx.fillText(tLabel, xy.x - tw/2, xy.y + 18);
-      }
-
-      // current position marker (only if above horizon)
       {
         const now = Date.now();
         const { altDeg, azDeg } = raDecToAltAz(new Date(now), raDeg, decDeg, latDeg, lonDeg);
@@ -2125,10 +2250,6 @@
           ctx.lineWidth = 2.3;
           ctx.beginPath();
           ctx.arc(xy.x, xy.y, 7, 0, Math.PI*2);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(xy.x - 7, xy.y); ctx.lineTo(xy.x + 7, xy.y);
-          ctx.moveTo(xy.x, xy.y - 7); ctx.lineTo(xy.x, xy.y + 7);
           ctx.stroke();
         }
       }
@@ -2146,9 +2267,9 @@
       const decDeg = parseDecDeg(obj.dec);
       if (raDeg == null || decDeg == null) { YEAR_DATA = null; return; }
 
-      const tz = loc.timezone || "UTC";
-      const { y: year, m: monthNow } = getZonedYMD(new Date(), tz);
-      const currentMonthIdx = clamp(monthNow - 1, 0, 11);
+      const base = getBaseYmdForLocation(loc);
+      const year = base.y;
+      const currentMonthIdx = clamp(base.m - 1, 0, 11);
 
       const horizonAtAzFn = getHorizonAtAzFn();
       const months = [];
@@ -2175,6 +2296,8 @@
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = "rgba(0,0,0,0.10)";
       ctx.fillRect(0, 0, w, h);
+
+      YEAR_BAR_HITBOXES = [];
 
       if (!YEAR_DATA) {
         ctx.fillStyle = "rgba(255,255,255,0.75)";
@@ -2232,6 +2355,8 @@
         const isNow = (i === YEAR_DATA.currentMonthIdx);
         ctx.fillStyle = isNow ? "rgba(255,200,90,0.80)" : "rgba(120,170,255,0.70)";
         ctx.fillRect(x, y, barW, barH);
+
+        YEAR_BAR_HITBOXES.push({ idx: i, x, w: barW, top, bottom });
 
         ctx.fillStyle = "rgba(255,255,255,0.82)";
         ctx.font = "12px ui-sans-serif, system-ui";
@@ -2398,6 +2523,58 @@
       });
     }
 
+    function wireDateControls(){
+      $("datePrev").addEventListener("click", async () => {
+        const loc = getCurrentLocation();
+        if (!loc) return;
+        getBaseYmdForLocation(loc);
+        await setSelectedDateIso(isoAddDays(SELECTED_DATE_ISO, -1), { switchToNight: true });
+      });
+
+      $("dateNext").addEventListener("click", async () => {
+        const loc = getCurrentLocation();
+        if (!loc) return;
+        getBaseYmdForLocation(loc);
+        await setSelectedDateIso(isoAddDays(SELECTED_DATE_ISO, +1), { switchToNight: true });
+      });
+
+      $("dateDisplay").addEventListener("click", () => {
+        const picker = $("datePicker");
+        if (!picker) return;
+        updateDateUI();
+        if (typeof picker.showPicker === "function") picker.showPicker();
+        else picker.click();
+      });
+
+      $("datePicker").addEventListener("change", async () => {
+        const v = $("datePicker").value;
+        if (!v) return;
+        await setSelectedDateIso(v, { switchToNight: true });
+      });
+    }
+
+    function wireYearCanvasClick(){
+      const canvas = $("yearCanvas");
+      canvas.addEventListener("click", async (e) => {
+        if (viewMode !== "year") return;
+        if (!YEAR_DATA || !Array.isArray(YEAR_BAR_HITBOXES) || YEAR_BAR_HITBOXES.length !== 12) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        let hit = null;
+        for (const b of YEAR_BAR_HITBOXES) {
+          if (x >= b.x && x <= (b.x + b.w) && y >= b.top && y <= b.bottom) { hit = b; break; }
+        }
+        if (!hit) return;
+
+        const month = hit.idx + 1;
+        const iso = ymdToIso(YEAR_DATA.year, month, 15);
+        await setSelectedDateIso(iso, { switchToNight: true });
+      });
+    }
+
     // -----------------------------
     // Load JSONs
     // -----------------------------
@@ -2455,6 +2632,7 @@
       $("mosaicLabel").textContent = `${$("mosaicRange").value}×`;
       updateFovLabels();
       updateHorizonStatus();
+      updateDateUI();
 
       if (loadState.objects.ok && loadState.locations.ok) {
         buildTypeFilterOptions();
@@ -2479,6 +2657,8 @@
       $("cameraSelect").addEventListener("change", () => { updateFovLabels(); refreshTableOnly(); });
 
       $("locationSelect").addEventListener("change", async () => {
+        updateDateUI();
+
         await recomputeVisibilityAndRender();
         if (viewMode === "night") drawNightChart();
         if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
@@ -2523,7 +2703,6 @@
           return;
         }
 
-        // numeric
         const n = Number(v);
         if (Number.isFinite(n)) {
           LAST_NUMERIC_HORIZON_DEG = n;
@@ -2585,11 +2764,15 @@
       wireViewModeRadios();
       wireSurveyDropdown();
 
+      wireDateControls();
+      wireYearCanvasClick();
+
       $("viewNight").checked = true;
       setViewMode("night");
 
       updateFovLabels();
       updateHorizonStatus();
+      updateDateUI();
       updateCaption();
       drawNightChart();
     })();
