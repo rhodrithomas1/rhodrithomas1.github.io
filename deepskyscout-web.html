@@ -12,7 +12,7 @@
       margin: 0 24px 60px 24px;
     }
 
-    /* --- Layout: desktop = controls+table left, chart right --- */
+    /* --- Layout: desktop = controls left (with table under), chart right --- */
     .planner-layout{
       display:grid;
       grid-template-columns: minmax(620px, 860px) 1fr;
@@ -30,7 +30,7 @@
     .refs-panel{ grid-area: refs; min-width:0; }
 
     @media (max-width: 1100px){
-      /* ✅ Portrait-ish mobile/tablet: Planner setup first, then chart, then table */
+      /* ✅ Portrait mobile/tablet: Planner setup, then chart, then table */
       .planner-layout{
         grid-template-columns: 1fr;
         grid-template-areas:
@@ -42,8 +42,8 @@
       }
     }
 
-    /* ✅ Phone landscape: controls on top, chart left, table right */
     @media (max-width: 900px) and (orientation: landscape){
+      /* ✅ Phone landscape: chart + table side-by-side */
       .planner-layout{
         grid-template-columns: 1fr 1fr;
         grid-template-areas:
@@ -169,7 +169,7 @@
       white-space:nowrap;
     }
 
-    /* Table + type filter */
+    /* Table controls */
     .table-controls{
       display:flex;
       align-items:center;
@@ -212,6 +212,9 @@
       font-weight:600;
     }
     .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;}
+
+    .desktop-only{ display: table-cell; }
+    .mobile-only{ display: none; }
 
     .chart-body{ padding: 12px; }
     #skyCanvas, #yearCanvas{
@@ -304,7 +307,34 @@
       overflow:auto;
     }
 
-    /* ✅ Phone portrait: shrink + simplify to fit chart + table on screen */
+    /* Mobile chart info (shown on mobile, night mode) */
+    .mobile-chart-info{
+      display:none;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.18);
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      line-height: 1.35;
+    }
+    .mobile-chart-info .t1{ font-weight: 700; }
+    .mobile-chart-info .t2{ margin-top: 4px; opacity: .95; }
+    .mobile-chart-info code{
+      background:rgba(0,0,0,.25);
+      padding:2px 6px;
+      border-radius:6px;
+    }
+
+    /* Table footer (mobile only) */
+    .table-foot{
+      display:none;
+      padding: 10px 12px;
+      border-top: 1px solid rgba(255,255,255,.10);
+      gap: 10px;
+      flex-direction: column;
+    }
+
+    /* ✅ Phone portrait adjustments */
     @media (max-width: 600px){
       .container.planner-container{
         margin: 0 12px 44px 12px;
@@ -314,46 +344,61 @@
         padding-top: 16px;
         padding-bottom: 16px;
       }
-      section.hero h1{ margin: 0 0 6px 0; }
 
+      /* Keep the three mode toggles horizontal */
       .chart-toggles{
         flex-direction: column;
         align-items: stretch;
         gap: 8px;
       }
-      .chart-left, .chart-middle, .chart-right{
+      .chart-left{
         min-width: 0 !important;
         width: 100%;
-        justify-content: flex-start;
+        display:grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
       }
-      .chart-right{ justify-content: stretch; }
-      .chart-right select{ max-width: none; width: 100%; }
+      .chart-left .toggle{
+        width: 100%;
+        justify-content:center;
+        padding: 6px 6px;
+        font-size: .85rem;
+      }
 
-      /* ✅ Remove grid mode buttons on mobile (always Alt-Az) */
+      /* Remove grid mode buttons (always Alt-Az) */
       .chart-middle{ display:none !important; }
       #sepNight{ display:none !important; }
+
+      .chart-right{
+        min-width: 0 !important;
+        width:100%;
+        justify-content: stretch;
+      }
+      .chart-right select{ max-width: none; width: 100%; }
 
       .chart-body{ padding: 8px; }
       .card-head{ padding: 9px 10px; }
 
+      .mobile-chart-info{ display:block; }
+
       .table-scroll{ max-height: 32vh; }
 
-      /* Hide less important cols on small screens:
-         - Common Name (merged into Name)
-         - Subtype (requested)
-      */
-      thead th:nth-child(2), tbody td:nth-child(2),
-      thead th:nth-child(6), tbody td:nth-child(6){
-        display:none;
-      }
+      /* Hide desktop-only cols, show mobile-only cols */
+      .desktop-only{ display:none !important; }
+      .mobile-only{ display: table-cell !important; }
 
       table{ font-size: .90rem; }
       thead th, tbody td{ padding: 8px 9px; }
 
       #aladinDiv{ height: 440px; }
+
+      /* Table footer visible on mobile */
+      .table-foot{ display:flex; }
+
+      /* Make header simpler on mobile */
+      #objectsCardHead{ justify-content: flex-start; }
     }
 
-    /* ✅ Phone landscape: side-by-side chart/table; constrain scrolls */
     @media (max-width: 900px) and (orientation: landscape){
       .chart-body{ padding: 8px; }
       .table-scroll{ max-height: 62vh; }
@@ -386,15 +431,15 @@
           </div>
 
           <div style="padding:12px;">
-            <div class="form-grid">
-              <div class="form-row">
+            <div class="form-grid" id="setupGrid">
+              <div class="form-row" id="locationRow">
                 <label for="locationSelect">Location</label>
                 <select id="locationSelect">
                   <option disabled selected>⏳ Loading…</option>
                 </select>
               </div>
 
-              <div class="form-row">
+              <div class="form-row" id="horizonRow">
                 <label for="horizonSelect">
                   Horizon altitude
                   <span class="muted" id="horizonFileStatus"> • No file loaded</span>
@@ -410,7 +455,7 @@
 
               <input id="horizonFileInput" type="file" accept=".hrz,.csv,.txt,text/plain,text/csv" style="display:none;" />
 
-              <div class="form-row">
+              <div class="form-row" id="minPixelsRow">
                 <label for="minPixelsInput">
                   Min object size (pixels)
                   <span class="muted" id="minPixelsFovLabel"> • FoV: —</span>
@@ -418,7 +463,7 @@
                 <input id="minPixelsInput" type="number" min="0" step="10" value="100" />
               </div>
 
-              <div class="form-row">
+              <div class="form-row" id="mosaicRow">
                 <label for="mosaicRange">
                   Mosaic (viewer)
                   <span class="muted" id="mosaicFovLabel"> • FoV: —</span>
@@ -429,14 +474,13 @@
                 </div>
               </div>
 
-              <div class="form-row">
+              <div class="form-row" id="telescopeRow">
                 <label for="telescopeSelect">Telescope</label>
                 <select id="telescopeSelect">
                   <option disabled selected>⏳ Loading…</option>
                 </select>
               </div>
 
-              <!-- ✅ Hidden on phone when smart scope selected -->
               <div class="form-row" id="reducerRow">
                 <label for="reducerSelect">Reducer / Barlow</label>
                 <select id="reducerSelect">
@@ -455,13 +499,12 @@
         </div>
       </div>
 
-      <!-- CHART / ALADIN -->
+      <!-- CHART -->
       <div class="chart-panel">
         <div class="card">
           <div class="card-head">
             <div class="status" id="chartTitle">
               <span id="chartTitleText">Tonight’s Visibility</span>
-
               <span class="date-nav night-only" id="dateNav" title="Change the date for Tonight’s Visibility">
                 <button class="date-btn" id="datePrev" type="button" aria-label="Previous day">‹</button>
                 <button class="date-pill" id="dateDisplay" type="button" title="Pick a date">—</button>
@@ -512,6 +555,9 @@
           </div>
 
           <div class="chart-body">
+            <!-- ✅ Mobile-only info (in chart area, above canvas) -->
+            <div class="mobile-chart-info" id="mobileChartInfo" style="display:none;"></div>
+
             <div id="nightPane">
               <canvas id="skyCanvas"></canvas>
             </div>
@@ -534,37 +580,47 @@
       <!-- TABLE -->
       <div class="table-panel">
         <div class="card">
-          <div class="card-head">
-            <div class="status" id="objectsStatus">⏳ Loading objects…</div>
+          <div class="card-head" id="objectsCardHead">
+            <div class="status">Objects</div>
 
-            <div class="table-controls">
+            <div class="table-controls" id="typeFilterWrap">
               <label for="typeFilter" class="muted">Type</label>
               <select id="typeFilter">
                 <option value="__all__" selected>All</option>
               </select>
             </div>
 
-            <div class="muted">Tap a row • Tap headers to sort</div>
+            <div class="muted" id="tableHint">Tap a row • Tap headers to sort</div>
+            <div class="status" id="objectsStatus">⏳ Loading objects…</div>
           </div>
 
           <div class="table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th data-key="name" style="min-width:120px;">Name <span class="arrow" id="arrow-name"></span></th>
-                  <th data-key="common_name" style="min-width:160px;">Common Name <span class="arrow" id="arrow-common_name"></span></th>
+                  <th data-key="name" style="min-width:140px;">Name <span class="arrow" id="arrow-name"></span></th>
+
+                  <!-- ✅ Mobile-only visibility (2nd column on mobile) -->
+                  <th data-key="visibility" class="mobile-only" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility-m"></span></th>
+
+                  <th data-key="common_name" class="desktop-only" style="min-width:160px;">Common Name <span class="arrow" id="arrow-common_name"></span></th>
                   <th data-key="magnitude" style="min-width:90px;">Mag <span class="arrow" id="arrow-magnitude"></span></th>
                   <th data-key="size" style="min-width:120px;">Size <span class="arrow" id="arrow-size"></span></th>
                   <th data-key="type" style="min-width:120px;">Type <span class="arrow" id="arrow-type"></span></th>
-                  <th data-key="subtype" style="min-width:160px;">Subtype <span class="arrow" id="arrow-subtype"></span></th>
-                  <th data-key="visibility" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility"></span></th>
+                  <th data-key="subtype" class="desktop-only" style="min-width:160px;">Subtype <span class="arrow" id="arrow-subtype"></span></th>
+
+                  <!-- ✅ Desktop-only visibility (last column on desktop) -->
+                  <th data-key="visibility" class="desktop-only" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility"></span></th>
                 </tr>
               </thead>
               <tbody id="objectsTbody">
-                <tr><td colspan="7" class="muted" style="padding:12px;">Loading…</td></tr>
+                <tr><td colspan="8" class="muted" style="padding:12px;">Loading…</td></tr>
               </tbody>
             </table>
           </div>
+
+          <!-- ✅ Mobile-only footer: type dropdown + status + hint live here (moved via JS) -->
+          <div class="table-foot" id="objectsFoot"></div>
         </div>
       </div>
 
@@ -587,6 +643,7 @@
     © 2026 Rhodri Thomas – Clear Skies
   </footer>
 
+  <!-- Aladin Lite v3 -->
   <script type="text/javascript" src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js" charset="utf-8"></script>
 
   <script>
@@ -724,64 +781,30 @@
       updateCaption();
     }
 
-    function setViewMode(mode) {
-      viewMode = mode;
-
-      const nightPane = $("nightPane");
-      const imagePane = $("imagePane");
-      const yearPane  = $("yearPane");
-
-      const nightOnly = document.querySelectorAll(".night-only");
-      const surveyWrap = $("surveyWrap");
-      const chartTitleText = $("chartTitleText");
-
-      if (mode === "night") {
-        nightPane.style.display = "";
-        imagePane.style.display = "none";
-        yearPane.style.display  = "none";
-        nightOnly.forEach(el => el.style.display = "inline-flex");
-        $("sepNight").style.display = "inline-flex";
-        surveyWrap.style.display = "none";
-        chartTitleText.textContent = "Tonight’s Visibility";
-        updateDateUI();
-        enforceMobileAltAz();
-        drawNightChart();
-        updateCaption();
-        return;
-      }
-
-      if (mode === "image") {
-        nightPane.style.display = "none";
-        imagePane.style.display = "";
-        yearPane.style.display  = "none";
-        nightOnly.forEach(el => el.style.display = "none");
-        $("sepNight").style.display = "none";
-        surveyWrap.style.display = "flex";
-        chartTitleText.textContent = "Sky Image (Aladin)";
-        initAladinIfNeeded();
-        updateCaption();
-        setTimeout(() => updateAladinFromSelection(true), 60);
-        return;
-      }
-
-      nightPane.style.display = "none";
-      imagePane.style.display = "none";
-      yearPane.style.display  = "";
-      nightOnly.forEach(el => el.style.display = "none");
-      $("sepNight").style.display = "none";
-      surveyWrap.style.display = "none";
-      chartTitleText.textContent = "Monthly Visibility";
-      computeYearIfPossible();
-      drawYearChart();
-      updateCaption();
-    }
-
     function url(rel) { return new URL(rel, window.location.href); }
 
     async function fetchJson(relPath) {
       const res = await fetch(url(relPath), { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       return await res.json();
+    }
+
+    function safe(v) {
+      if (v === null || v === undefined || v === "") return "—";
+      return String(v);
+    }
+
+    function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+    function parseMagnitude(val) {
+      if (val === null || val === undefined) return NaN;
+      if (typeof val === "string" && val.trim() === "") return NaN;
+      const n = Number(val);
+      return Number.isFinite(n) ? n : NaN;
+    }
+    function formatMagnitude(val) {
+      const n = parseMagnitude(val);
+      return Number.isFinite(n) ? n.toFixed(2) : "—";
     }
 
     function clearAndAddStatusOption(selectEl, text) {
@@ -808,24 +831,95 @@
       fillOptionsIndex(selectEl, items, labelFn);
     }
 
-    function safe(v) {
-      if (v === null || v === undefined || v === "") return "—";
-      return String(v);
+    // -----------------------------
+    // Mobile-only layout tweaks
+    // -----------------------------
+    function updateTableLayoutForMobile(){
+      const mob = isMobileNarrow();
+      const head = $("objectsCardHead");
+      const foot = $("objectsFoot");
+      const controls = $("typeFilterWrap");
+      const status = $("objectsStatus");
+      const hint = $("tableHint");
+
+      if (!head || !foot || !controls || !status || !hint) return;
+
+      if (mob) {
+        if (controls.parentElement !== foot) foot.appendChild(controls);
+        if (status.parentElement !== foot) foot.appendChild(status);
+        if (hint.parentElement !== foot) foot.appendChild(hint);
+      } else {
+        // restore to header
+        if (status.parentElement !== head) head.appendChild(status);
+        if (controls.parentElement !== head) head.appendChild(controls);
+        if (hint.parentElement !== head) head.appendChild(hint);
+      }
     }
 
-    function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+    function updateControlsLayoutForMobile(){
+      const mob = isMobileNarrow();
+      const grid = $("setupGrid");
+      const telescopeRow = $("telescopeRow");
+      const horizonRow = $("horizonRow");
+      const reducerRow = $("reducerRow"); // anchor for desktop restore
 
-    function parseMagnitude(val) {
-      if (val === null || val === undefined) return NaN;
-      if (typeof val === "string" && val.trim() === "") return NaN;
-      const n = Number(val);
-      return Number.isFinite(n) ? n : NaN;
-    }
-    function formatMagnitude(val) {
-      const n = parseMagnitude(val);
-      return Number.isFinite(n) ? n.toFixed(2) : "—";
+      if (!grid || !telescopeRow || !horizonRow || !reducerRow) return;
+
+      if (mob) {
+        // move Telescope between Location and Horizon
+        if (telescopeRow.nextElementSibling !== horizonRow) {
+          grid.insertBefore(telescopeRow, horizonRow);
+        }
+      } else {
+        // restore Telescope back before reducer (default desktop order)
+        if (telescopeRow.nextElementSibling !== reducerRow) {
+          grid.insertBefore(telescopeRow, reducerRow);
+        }
+      }
     }
 
+    function isSmartTelescope(scope) {
+      const n = (scope?.name ?? "").toLowerCase();
+      return !!scope?.is_smart || !!scope?.isSmart || !!scope?.smart ||
+             n.includes("seestar") || n.includes("vespera") || n.includes("dwarf");
+    }
+    function getFixedCameraName(scope) {
+      return (scope?.fixed_camera_name || scope?.fixedCameraName || scope?.camera_name || scope?.cameraName || "");
+    }
+    function getSelected(selectEl, arr) {
+      const idx = Number.parseInt(selectEl.value, 10);
+      return Number.isFinite(idx) ? arr[idx] : arr[0];
+    }
+
+    function updateMobileSmartScopeUI(){
+      const scope = getSelected($("telescopeSelect"), TELESCOPES);
+      const smart = isSmartTelescope(scope);
+
+      const reducerRow = $("reducerRow");
+      const cameraRow  = $("cameraRow");
+      if (!reducerRow || !cameraRow) return;
+
+      if (isPhoneLike() && smart) {
+        reducerRow.style.display = "none";
+        cameraRow.style.display = "none";
+      } else {
+        reducerRow.style.display = "";
+        cameraRow.style.display = "";
+      }
+    }
+
+    function updateAllResponsiveUI(){
+      enforceMobileAltAz();
+      updateMobileSmartScopeUI();
+      updateControlsLayoutForMobile();
+      updateTableLayoutForMobile();
+      renderObjectsTable(); // ensures merged-name render stays correct when crossing breakpoint
+      updateMobileChartInfo();
+    }
+
+    // -----------------------------
+    // Horizon profile parsing
+    // -----------------------------
     function normalizeAz360ForInput(az) {
       const eps = 1e-9;
       if (!Number.isFinite(az)) return NaN;
@@ -835,13 +929,11 @@
       if (Math.abs(a) < eps && az > 0) return 360;
       return a;
     }
-
     function normalizeAz(az) {
       let a = az % 360;
       if (a < 0) a += 360;
       return a;
     }
-
     function extractFirstTwoNumbers(line) {
       const m = String(line).match(/-?\d+(\.\d+)?/g);
       if (!m || m.length < 2) return null;
@@ -850,7 +942,6 @@
       if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
       return [a, b];
     }
-
     function computeAltAt0FromWrap(sortedPtsNo0No360) {
       if (!sortedPtsNo0No360 || sortedPtsNo0No360.length < 2) return null;
       const first = sortedPtsNo0No360[0];
@@ -860,7 +951,6 @@
       const u = (360 - last.az) / span;
       return last.alt + u * (first.alt - last.alt);
     }
-
     function parseHorizonFileText(text, filename = "horizon") {
       const pts = [];
       const lines = String(text).split(/\r?\n/);
@@ -1008,36 +1098,9 @@
       rebuildHorizonSelectOptions();
     }
 
-    function isSmartTelescope(scope) {
-      const n = (scope?.name ?? "").toLowerCase();
-      return !!scope?.is_smart || !!scope?.isSmart || !!scope?.smart ||
-             n.includes("seestar") || n.includes("vespera") || n.includes("dwarf");
-    }
-    function getFixedCameraName(scope) {
-      return (scope?.fixed_camera_name || scope?.fixedCameraName || scope?.camera_name || scope?.cameraName || "");
-    }
-    function getSelected(selectEl, arr) {
-      const idx = Number.parseInt(selectEl.value, 10);
-      return Number.isFinite(idx) ? arr[idx] : arr[0];
-    }
-
-    function updateMobileSmartScopeUI(){
-      const scope = getSelected($("telescopeSelect"), TELESCOPES);
-      const smart = isSmartTelescope(scope);
-
-      const reducerRow = $("reducerRow");
-      const cameraRow  = $("cameraRow");
-      if (!reducerRow || !cameraRow) return;
-
-      if (isPhoneLike() && smart) {
-        reducerRow.style.display = "none";
-        cameraRow.style.display = "none";
-      } else {
-        reducerRow.style.display = "";
-        cameraRow.style.display = "";
-      }
-    }
-
+    // -----------------------------
+    // Smart camera / reducer selects
+    // -----------------------------
     function rebuildSmartCameraSet() {
       SMART_CAMERA_NAMES = new Set(
         (TELESCOPES || [])
@@ -1134,13 +1197,16 @@
       return Number.isFinite(idx) ? REDUCERS[idx] : REDUCERS[0];
     }
 
+    // -----------------------------
+    // Type filter
+    // -----------------------------
     function buildTypeFilterOptions() {
       const sel = $("typeFilter");
       if (!sel || !Array.isArray(OBJECTS)) return;
 
       const prev = sel.value || "__all__";
-      const types = new Set();
 
+      const types = new Set();
       for (const o of OBJECTS) {
         const t = String(o?.type ?? "").trim();
         if (t) types.add(t);
@@ -1169,6 +1235,9 @@
       return sel ? sel.value : "__all__";
     }
 
+    // -----------------------------
+    // Sun times + night window
+    // -----------------------------
     function clamp360(deg) {
       let x = deg % 360;
       if (x < 0) x += 360;
@@ -1338,6 +1407,9 @@
       return false;
     }
 
+    // -----------------------------
+    // Alt/Az
+    // -----------------------------
     function jdFromDate(date) {
       return (date.getTime() / 86400000) + 2440587.5;
     }
@@ -1413,6 +1485,7 @@
       return { altDeg, azDeg };
     }
 
+    // Standalone horizon: uses ONLY numeric floor OR ONLY custom profile (no stacking)
     function computeVisibilityForObjectInWindow(location, horizonAtAzFn, raDeg, decDeg, startUtc, endUtc){
       const latDeg = Number(location.latitude);
       const lonDeg = Number(location.longitude);
@@ -1545,6 +1618,9 @@
       return results;
     }
 
+    // -----------------------------
+    // Pixel size filter
+    // -----------------------------
     function getObjectArcmin(o) {
       const aRaw = o?.size_major_arcmin;
       const bRaw = o?.size_minor_arcmin;
@@ -1576,7 +1652,7 @@
       const px = Number(cam.pixel_um);
       if (!Number.isFinite(effFocal) || effFocal <= 0 || !Number.isFinite(px) || px <= 0) return null;
 
-      return 206.265 * px / effFocal;
+      return 206.265 * px / effFocal; // internal arcsec/px
     }
 
     function objectPixelsMajor(o, scaleArcsecPerPx) {
@@ -1612,6 +1688,63 @@
       }
     }
 
+    // -----------------------------
+    // FoV labels (degrees + arcminutes)
+    // -----------------------------
+    function calcFovDegrees(sensor_mm, focal_mm) {
+      return (2 * Math.atan(sensor_mm / (2 * focal_mm))) * DEG;
+    }
+
+    function computeRigFovDegNullable(mosaicFactor){
+      const scope = getSelected($("telescopeSelect"), TELESCOPES);
+      const red = getSelectedReducer();
+      const cam = getSelectedCamera();
+      if (!scope || !red || !cam) return null;
+
+      const effFocal = Number(scope.focal_mm) * Number(red.factor);
+      if (!Number.isFinite(effFocal) || effFocal <= 0) return null;
+
+      const fovW = calcFovDegrees(Number(cam.sensor_w_mm), effFocal);
+      const fovH = calcFovDegrees(Number(cam.sensor_h_mm), effFocal);
+
+      const mosaic = Number(mosaicFactor) || 1;
+
+      let f = Math.max(fovW, fovH) * mosaic;
+      if (!Number.isFinite(f) || f <= 0) return null;
+
+      f = Math.max(0.05, Math.min(60, f));
+      return f;
+    }
+
+    function computeRigFovDeg() {
+      const mosaic = Number($("mosaicRange").value) || 1;
+      return computeRigFovDegNullable(mosaic) ?? 2.0;
+    }
+
+    function formatDegArcmin(deg){
+      if (!Number.isFinite(deg)) return "—";
+      const arcmin = deg * 60;
+      return `${deg.toFixed(2)}° / ${arcmin.toFixed(1)}′`;
+    }
+
+    function updateFovLabels(){
+      const minPx = Math.max(0, Number($("minPixelsInput").value || 0));
+      const scaleArcsecPerPx = computeImageScaleArcsecPerPixel();
+      const minDeg = Number.isFinite(scaleArcsecPerPx) ? (minPx * scaleArcsecPerPx / 3600) : NaN;
+
+      const mosaic = Number($("mosaicRange").value) || 1;
+      const mosaicFovDeg = computeRigFovDegNullable(mosaic);
+
+      const minEl = $("minPixelsFovLabel");
+      const mosEl = $("mosaicFovLabel");
+
+      if (minEl) minEl.textContent = ` • FoV: ${formatDegArcmin(minDeg)}`;
+      if (mosEl)  mosEl.textContent = ` • FoV: ${formatDegArcmin(mosaicFovDeg)}`;
+    }
+
+    // -----------------------------
+    // Table rendering & sorting
+    // -----------------------------
     function formatSize(o) {
       const { major, minor } = getObjectArcmin(o);
       if (major > 0) {
@@ -1627,12 +1760,14 @@
 
     function setHeaderArrows() {
       const keys = ["name","common_name","magnitude","size","type","subtype","visibility"];
+
       for (const k of keys) {
         const el = document.getElementById(`arrow-${k}`);
-        if (!el) continue;
-        if (sortState.key === k) el.textContent = (sortState.dir === "asc") ? "▲" : "▼";
-        else el.textContent = "";
+        if (el) el.textContent = (sortState.key === k) ? ((sortState.dir === "asc") ? "▲" : "▼") : "";
       }
+      // mobile visibility arrow (second col)
+      const vm = document.getElementById("arrow-visibility-m");
+      if (vm) vm.textContent = (sortState.key === "visibility") ? ((sortState.dir === "asc") ? "▲" : "▼") : "";
     }
 
     function sortLabel() {
@@ -1717,12 +1852,18 @@
 
         tr.innerHTML = `
           <td class="mono">${formatMobileMergedName(o)}</td>
-          <td>${safe(o.common_name)}</td>
+
+          <!-- mobile visibility (2nd col) -->
+          <td class="vis-cell mobile-only">${visH.toFixed(2)}h</td>
+
+          <td class="desktop-only">${safe(o.common_name)}</td>
           <td>${formatMagnitude(o.magnitude)}</td>
           <td>${formatSize(o)}</td>
           <td>${safe(o.type)}</td>
-          <td>${safe(o.subtype)}</td>
-          <td class="vis-cell">${visH.toFixed(2)}h</td>
+          <td class="desktop-only">${safe(o.subtype)}</td>
+
+          <!-- desktop visibility (last col) -->
+          <td class="vis-cell desktop-only">${visH.toFixed(2)}h</td>
         `;
         tbody.appendChild(tr);
       }
@@ -1735,13 +1876,14 @@
       FILTERED_INDICES.sort(compareIdx);
 
       if (FILTERED_INDICES.length === 0) {
-        $("objectsTbody").innerHTML = `<tr><td colspan="7" class="muted" style="padding:12px;">No objects match your filters.</td></tr>`;
+        $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">No objects match your filters.</td></tr>`;
         setHeaderArrows();
         selectedObjectIdx = null;
         if (viewMode === "night") drawNightChart();
         if (viewMode === "year") { YEAR_DATA = null; drawYearChart(); }
         if (viewMode === "image") updateAladinFromSelection(true);
         updateCaption();
+        updateMobileChartInfo();
         return;
       }
 
@@ -1756,14 +1898,18 @@
       if (viewMode === "image") updateAladinFromSelection(true);
 
       updateCaption();
+      updateMobileChartInfo();
     }
 
+    // -----------------------------
+    // Status + recompute
+    // -----------------------------
     async function recomputeVisibilityAndRender() {
       const loc = getSelected($("locationSelect"), LOCATIONS);
       updateDateUI();
 
       $("objectsStatus").textContent = "⏳ Calculating visibility…";
-      $("objectsTbody").innerHTML = `<tr><td colspan="7" class="muted" style="padding:12px;">Calculating…</td></tr>`;
+      $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">Calculating…</td></tr>`;
 
       await new Promise(r => setTimeout(r, 0));
 
@@ -1772,75 +1918,31 @@
       buildTypeFilterOptions();
       refreshTableOnly();
 
-      // ✅ Removed the whole "Date: … Sunset–Sunrise: … Horizon: …" line (all versions)
       $("objectsStatus").textContent =
         `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} • sorted by ${sortLabel()}`;
     }
 
-    function calcFovDegrees(sensor_mm, focal_mm) {
-      return (2 * Math.atan(sensor_mm / (2 * focal_mm))) * DEG;
-    }
-
-    function computeRigFovDegNullable(mosaicFactor){
-      const scope = getSelected($("telescopeSelect"), TELESCOPES);
-      const red = getSelectedReducer();
-      const cam = getSelectedCamera();
-      if (!scope || !red || !cam) return null;
-
-      const effFocal = Number(scope.focal_mm) * Number(red.factor);
-      if (!Number.isFinite(effFocal) || effFocal <= 0) return null;
-
-      const fovW = calcFovDegrees(Number(cam.sensor_w_mm), effFocal);
-      const fovH = calcFovDegrees(Number(cam.sensor_h_mm), effFocal);
-
-      const mosaic = Number(mosaicFactor) || 1;
-
-      let f = Math.max(fovW, fovH) * mosaic;
-      if (!Number.isFinite(f) || f <= 0) return null;
-
-      f = Math.max(0.05, Math.min(60, f));
-      return f;
-    }
-
-    function computeRigFovDeg() {
-      const mosaic = Number($("mosaicRange").value) || 1;
-      return computeRigFovDegNullable(mosaic) ?? 2.0;
-    }
-
-    function formatDegArcmin(deg){
-      if (!Number.isFinite(deg)) return "—";
-      const arcmin = deg * 60;
-      return `${deg.toFixed(2)}° / ${arcmin.toFixed(1)}′`;
-    }
-
-    function updateFovLabels(){
-      const minPx = Math.max(0, Number($("minPixelsInput").value || 0));
-      const scaleArcsecPerPx = computeImageScaleArcsecPerPixel();
-      const minDeg = Number.isFinite(scaleArcsecPerPx) ? (minPx * scaleArcsecPerPx / 3600) : NaN;
-
-      const mosaic = Number($("mosaicRange").value) || 1;
-      const mosaicFovDeg = computeRigFovDegNullable(mosaic);
-
-      const minEl = $("minPixelsFovLabel");
-      const mosEl = $("mosaicFovLabel");
-
-      if (minEl) minEl.textContent = ` • FoV: ${formatDegArcmin(minDeg)}`;
-      if (mosEl)  mosEl.textContent = ` • FoV: ${formatDegArcmin(mosaicFovDeg)}`;
-    }
-
+    // -----------------------------
+    // Caption + mobile chart info
+    // -----------------------------
     function getSelectedObjectSafe() {
       if (selectedObjectIdx == null) return null;
       return OBJECTS?.[selectedObjectIdx] ?? null;
     }
 
-    function getObjectDisplayName(obj) {
+    function getObjectDisplayNamePlain(obj){
       if (!obj) return "—";
       const n = safe(obj.name);
       const cn = String(obj.common_name ?? "").trim();
-      return cn ? `${n} <span class="muted">(${safe(cn)})</span>` : n;
+      return cn ? `${n} (${safe(cn)})` : n;
     }
 
-    function buildTonightLines(loc) {
+    function getGridMode(){
+      if (isMobileNarrow()) return "altaz";
+      return $("gridEqu").checked ? "equ" : "altaz";
+    }
+
+    function buildTonightData(loc){
       const tz = NIGHT_WINDOW?.tz || loc?.timezone || "UTC";
       const vis = (selectedObjectIdx != null) ? VIS_RESULTS.get(selectedObjectIdx) : null;
 
@@ -1856,10 +1958,35 @@
 
       const maxAlt = (vis && vis.maxAltDeg != null) ? vis.maxAltDeg : null;
 
-      const desktopLine = `Sunset–Sunrise: <code>${sunsetSunrise}</code> • Total: <code>${visH.toFixed(2)}h</code> • Best window: <code>${bestWindow}</code>${maxAlt != null ? ` • Max altitude: <code>${maxAlt.toFixed(1)}°</code>` : ""}`;
-      const mobileLine = `Total: <code>${visH.toFixed(2)}h</code> • Best window: <code>${bestWindow}</code>${maxAlt != null ? ` • Max altitude: <code>${maxAlt.toFixed(1)}°</code>` : ""}`;
+      return { tz, visH, sunsetSunrise, bestWindow, maxAlt };
+    }
 
-      return { desktopLine, mobileLine };
+    function updateMobileChartInfo(){
+      const box = $("mobileChartInfo");
+      if (!box) return;
+
+      const mob = isMobileNarrow();
+      const loc = getSelected($("locationSelect"), LOCATIONS);
+      const obj = getSelectedObjectSafe();
+
+      if (!mob || viewMode !== "night" || !loc || !obj) {
+        box.style.display = "none";
+        box.innerHTML = "";
+        return;
+      }
+
+      const d = buildTonightData(loc);
+
+      box.innerHTML = `
+        <div class="t1">${safe(getObjectDisplayNamePlain(obj))}</div>
+        <div class="t2">
+          Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
+          &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
+          &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
+          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}
+        </div>
+      `;
+      box.style.display = "";
     }
 
     function buildImageTopLine(obj) {
@@ -1887,47 +2014,17 @@
         return;
       }
 
-      const horizonLabel = (HORIZON_MODE === "custom" && HORIZON_PROFILE)
-        ? `custom (${safe(HORIZON_PROFILE.filename)})`
-        : `${getHorizonFloorDeg()}°`;
-
-      const lines = buildTonightLines(loc);
-      const isMob = isMobileNarrow();
-
       if (viewMode === "night") {
-        const legendLine = `Day=yellow / Night=blue • Current position=red • Meridian=green • Horizon limit=${horizonLabel}`;
-
-        if (isMob) {
-          cap.innerHTML = `
-            <div><strong>${getObjectDisplayName(obj)}</strong></div>
-            <div style="margin-top:4px;">${lines.mobileLine}</div>
-          `;
-        } else {
-          cap.innerHTML = `
-            <div class="muted">${legendLine}</div>
-            <div style="margin-top:6px;"><strong>${getObjectDisplayName(obj)}</strong></div>
-            <div style="margin-top:4px;">${lines.desktopLine}</div>
-          `;
-        }
+        // Keep caption light; mobile uses the box above the chart for detailed info.
+        cap.innerHTML = isMobileNarrow()
+          ? `<span class="muted">Tip: tap an object row to update the chart.</span>`
+          : `<strong>${safe(obj.name)}</strong> <span class="muted">(${safe(obj.common_name)})</span>`;
         return;
       }
 
       if (viewMode === "image") {
         const topLine = buildImageTopLine(obj);
-
-        if (isMob) {
-          cap.innerHTML = `
-            <div><strong>${topLine}</strong></div>
-            <div style="margin-top:6px;"><strong>${getObjectDisplayName(obj)}</strong></div>
-            <div style="margin-top:4px;">${lines.mobileLine}</div>
-          `;
-        } else {
-          cap.innerHTML = `
-            <div><strong>${topLine}</strong></div>
-            <div style="margin-top:6px;"><strong>${getObjectDisplayName(obj)}</strong></div>
-            <div style="margin-top:4px;">${lines.desktopLine}</div>
-          `;
-        }
+        cap.innerHTML = `<div><strong>${topLine}</strong></div>`;
         return;
       }
 
@@ -1937,24 +2034,71 @@
         return;
       }
 
-      const mins = YEAR_DATA.months || [];
-      const maxMins = Math.max(0, ...mins);
-      const bestMonthIdx = mins.indexOf(maxMins);
-      const monthsShort = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-      const bestLabel = (bestMonthIdx >= 0) ? monthsShort[bestMonthIdx] : "—";
-      const maxH = maxMins / 60;
-
       cap.innerHTML = `
-        <div><strong>Monthly Visibility</strong> • ${getObjectDisplayName(obj)}</div>
-        <div style="margin-top:4px;">
-          Year: <code>${YEAR_DATA.year}</code> • Best month (mid-month sample): <code>${bestLabel}</code> • Max: <code>${maxH.toFixed(2)}h</code>
-        </div>
-        <div class="muted" style="margin-top:4px;">
-          Tip: click a month bar to jump Tonight’s Visibility to the mid-month sample date.
-        </div>
+        <div class="muted">Tip: click a month bar to jump Tonight’s Visibility to the mid-month sample date.</div>
       `;
     }
 
+    // -----------------------------
+    // View switching
+    // -----------------------------
+    function setViewMode(mode) {
+      viewMode = mode;
+
+      const nightPane = $("nightPane");
+      const imagePane = $("imagePane");
+      const yearPane  = $("yearPane");
+
+      const nightOnly = document.querySelectorAll(".night-only");
+      const surveyWrap = $("surveyWrap");
+      const chartTitleText = $("chartTitleText");
+
+      if (mode === "night") {
+        nightPane.style.display = "";
+        imagePane.style.display = "none";
+        yearPane.style.display  = "none";
+        nightOnly.forEach(el => el.style.display = "inline-flex");
+        $("sepNight").style.display = "inline-flex";
+        surveyWrap.style.display = "none";
+        chartTitleText.textContent = "Tonight’s Visibility";
+        updateDateUI();
+        updateAllResponsiveUI();
+        drawNightChart();
+        updateCaption();
+        return;
+      }
+
+      if (mode === "image") {
+        nightPane.style.display = "none";
+        imagePane.style.display = "";
+        yearPane.style.display  = "none";
+        nightOnly.forEach(el => el.style.display = "none");
+        $("sepNight").style.display = "none";
+        surveyWrap.style.display = "flex";
+        chartTitleText.textContent = "Sky Image (Aladin)";
+        initAladinIfNeeded();
+        updateAllResponsiveUI();
+        updateCaption();
+        setTimeout(() => updateAladinFromSelection(true), 60);
+        return;
+      }
+
+      nightPane.style.display = "none";
+      imagePane.style.display = "none";
+      yearPane.style.display  = "";
+      nightOnly.forEach(el => el.style.display = "none");
+      $("sepNight").style.display = "none";
+      surveyWrap.style.display = "none";
+      chartTitleText.textContent = "Monthly Visibility";
+      updateAllResponsiveUI();
+      computeYearIfPossible();
+      drawYearChart();
+      updateCaption();
+    }
+
+    // -----------------------------
+    // Chart drawing (Tonight)
+    // -----------------------------
     function prepareCanvas(canvas, minCssH) {
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
@@ -1993,11 +2137,6 @@
       const r = (z / 90) * radiusMax;
       const a = azDeg * RAD;
       return { x: cx + r * Math.sin(a), y: cy - r * Math.cos(a) };
-    }
-
-    function getGridMode(){
-      if (isMobileNarrow()) return "altaz";
-      return $("gridEqu").checked ? "equ" : "altaz";
     }
 
     function drawAltAzGrid(ctx, cx, cy, radiusMax) {
@@ -2042,62 +2181,6 @@
         ctx.fillText(String(az), x - 10, y + 5);
       }
 
-      ctx.restore();
-    }
-
-    function drawEquatorialGrid(ctx, loc, refUtc, cx, cy, radiusMax) {
-      ctx.save();
-      ctx.strokeStyle = "rgba(120,170,210,0.55)";
-      ctx.lineWidth = 2.2;
-      ctx.setLineDash([8, 8]);
-
-      const latDeg = Number(loc.latitude);
-      const lonDeg = Number(loc.longitude);
-
-      function strokePolyline(points) {
-        if (points.length < 2) return;
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-        ctx.stroke();
-      }
-
-      for (let rah = 0; rah < 24; rah++) {
-        const pts = [];
-        let started = false;
-        for (let dec = -80; dec <= 80; dec += 2) {
-          const ra = rah * 15;
-          const { altDeg, azDeg } = raDecToAltAz(refUtc, ra, dec, latDeg, lonDeg);
-          if (altDeg >= 0) {
-            pts.push(projectAltAz(altDeg, azDeg, cx, cy, radiusMax));
-            started = true;
-          } else if (started) {
-            strokePolyline(pts);
-            pts.length = 0;
-            started = false;
-          }
-        }
-        if (pts.length >= 2) strokePolyline(pts);
-      }
-
-      for (let dec = -60; dec <= 60; dec += 15) {
-        const pts = [];
-        let started = false;
-        for (let ra = 0; ra < 360; ra += 3) {
-          const { altDeg, azDeg } = raDecToAltAz(refUtc, ra, dec, latDeg, lonDeg);
-          if (altDeg >= 0) {
-            pts.push(projectAltAz(altDeg, azDeg, cx, cy, radiusMax));
-            started = true;
-          } else if (started) {
-            strokePolyline(pts);
-            pts.length = 0;
-            started = false;
-          }
-        }
-        if (pts.length >= 2) strokePolyline(pts);
-      }
-
-      ctx.setLineDash([]);
       ctx.restore();
     }
 
@@ -2170,13 +2253,10 @@
       ctx.fillText("E", cx + radiusMax + pad, cy + 6);
       ctx.fillText("W", cx - radiusMax - pad - 14, cy + 6);
 
-      if (gridMode === "altaz") {
-        drawAltAzGrid(ctx, cx, cy, radiusMax);
-      } else {
-        const midMs = (NIGHT_WINDOW.startUtc.getTime() + NIGHT_WINDOW.endUtc.getTime()) / 2;
-        drawEquatorialGrid(ctx, loc, new Date(midMs), cx, cy, radiusMax);
-      }
+      // Grid
+      drawAltAzGrid(ctx, cx, cy, radiusMax);
 
+      // Horizon visualisation
       if (HORIZON_MODE === "custom" && HORIZON_PROFILE) drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
       else drawNumericHorizonCircle(ctx, cx, cy, radiusMax, getHorizonFloorDeg());
 
@@ -2233,6 +2313,7 @@
         strokeSegment(A, B, col);
       }
 
+      // current position marker (only if above horizon)
       {
         const now = Date.now();
         const { altDeg, azDeg } = raDecToAltAz(new Date(now), raDeg, decDeg, latDeg, lonDeg);
@@ -2249,6 +2330,9 @@
       }
     }
 
+    // -----------------------------
+    // Monthly visibility
+    // -----------------------------
     function computeYearIfPossible() {
       const loc = getSelected($("locationSelect"), LOCATIONS);
       if (!loc || selectedObjectIdx == null || !OBJECTS[selectedObjectIdx]) { YEAR_DATA = null; return; }
@@ -2365,6 +2449,9 @@
       ctx.fillText(`Max: ${maxH.toFixed(2)}h`, right - 110, 20);
     }
 
+    // -----------------------------
+    // Aladin integration
+    // -----------------------------
     function initAladinIfNeeded() {
       if (aladin || aladinInitStarted) return;
 
@@ -2419,6 +2506,9 @@
       aladinSetFovDeg(computeRigFovDeg());
     }
 
+    // -----------------------------
+    // Wiring
+    // -----------------------------
     function wireTableClick() {
       const tbody = $("objectsTbody");
       tbody.addEventListener("click", (e) => {
@@ -2437,6 +2527,7 @@
         if (viewMode === "image") updateAladinFromSelection(true);
 
         updateCaption();
+        updateMobileChartInfo();
       });
     }
 
@@ -2466,14 +2557,10 @@
       window.addEventListener("resize", () => {
         if (t) clearTimeout(t);
         t = setTimeout(() => {
-          enforceMobileAltAz();
-          updateMobileSmartScopeUI();
+          updateAllResponsiveUI();
           if (viewMode === "night") drawNightChart();
           else if (viewMode === "year") drawYearChart();
           else updateAladinFromSelection(false);
-          updateCaption();
-          // re-render table so merged name updates immediately when crossing 600px breakpoint
-          renderObjectsTable();
         }, 140);
       });
 
@@ -2560,6 +2647,9 @@
       });
     }
 
+    // -----------------------------
+    // Load JSONs
+    // -----------------------------
     async function loadAllJson() {
       try {
         const data = await fetchJson("assets/locations.json");
@@ -2615,17 +2705,18 @@
       updateFovLabels();
       updateHorizonStatus();
       updateDateUI();
-      enforceMobileAltAz();
-      updateMobileSmartScopeUI();
+
+      updateAllResponsiveUI();
 
       if (loadState.objects.ok && loadState.locations.ok) {
         buildTypeFilterOptions();
         await recomputeVisibilityAndRender();
         drawNightChart();
         updateCaption();
+        updateMobileChartInfo();
       } else {
         $("objectsStatus").textContent = `❌ Objects not loaded: ${loadState.objects.err || "unknown"}`;
-        $("objectsTbody").innerHTML = `<tr><td colspan="7" class="muted" style="padding:12px;">No objects loaded.</td></tr>`;
+        $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">No objects loaded.</td></tr>`;
       }
     }
 
@@ -2633,7 +2724,7 @@
       $("telescopeSelect").addEventListener("change", () => {
         rebuildCameraSelect();
         rebuildReducerSelect();
-        updateMobileSmartScopeUI();
+        updateAllResponsiveUI();
         updateFovLabels();
         refreshTableOnly();
       });
@@ -2648,6 +2739,7 @@
         if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
         if (viewMode === "image") updateAladinFromSelection(true);
         updateCaption();
+        updateMobileChartInfo();
       });
 
       $("horizonSelect").addEventListener("change", async () => {
@@ -2669,6 +2761,7 @@
           if (viewMode === "night") drawNightChart();
           if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
           updateCaption();
+          updateMobileChartInfo();
           return;
         }
 
@@ -2680,6 +2773,7 @@
             if (viewMode === "night") drawNightChart();
             if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
             updateCaption();
+            updateMobileChartInfo();
           } else {
             HORIZON_MODE = "numeric";
             updateHorizonStatus();
@@ -2697,6 +2791,7 @@
           if (viewMode === "night") drawNightChart();
           if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
           updateCaption();
+          updateMobileChartInfo();
         }
       });
 
@@ -2726,6 +2821,7 @@
           if (viewMode === "night") drawNightChart();
           if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
           updateCaption();
+          updateMobileChartInfo();
         } catch (err) {
           HORIZON_PROFILE = null;
           HORIZON_MODE = "numeric";
@@ -2747,20 +2843,16 @@
       wireNightRadios();
       wireViewModeRadios();
       wireSurveyDropdown();
-
       wireDateControls();
       wireYearCanvasClick();
 
       $("viewNight").checked = true;
       setViewMode("night");
 
-      updateFovLabels();
-      updateHorizonStatus();
-      updateDateUI();
-      enforceMobileAltAz();
-      updateMobileSmartScopeUI();
+      updateAllResponsiveUI();
       updateCaption();
       drawNightChart();
+      updateMobileChartInfo();
     })();
   </script>
 </body>
