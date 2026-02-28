@@ -18,7 +18,8 @@
     { "aperture_mm": 30, "focal_mm": 150, "name": "DWARFLAB DWARF Mini", "is_smart": true, "fixed_camera_name": "DWARF Mini (IMX662)" },
 
     { "aperture_mm": 203, "focal_mm": 800, "name": "Newtonian 800/203" },
+    
+    { "aperture_mm": 203, "focal_mm": 1000, "name": "Newtonian 1000/203" }
     { "aperture_mm": 80, "focal_mm": 400, "name": "Refractor 400/80" },
-    { "aperture_mm": 203, "focal_mm": 1000, "name": "SCT 1000/203" }
   ]
 }
