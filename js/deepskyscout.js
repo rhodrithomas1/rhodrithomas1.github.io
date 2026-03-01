@@ -1,1 +1,2626 @@
+/* js/deepskyscout.js */
+/* DeepSkyScout planner logic (extracted from inline <script> block) */
 
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  const RAD = Math.PI / 180;
+  const DEG = 180 / Math.PI;
+
+  let LOCATIONS = [];
+  let TELESCOPES = [];
+  let REDUCERS = [];
+
+  // -----------------------------
+  // Custom telescope (user-defined)
+  // -----------------------------
+  let CUSTOM_TELESCOPE = {
+    name: "Custom telescope",
+    aperture_mm: 80,
+    focal_mm: 400,
+    is_custom: true
+  };
+
+  let CAMERAS_ALL = [];
+  let SMART_CAMERA_NAMES = new Set();
+
+  let OBJECTS = [];
+  let VIS_RESULTS = new Map();
+  let FILTERED_INDICES = [];
+  let selectedObjectIdx = null;
+
+  const sortState = { key: "visibility", dir: "desc" };
+
+  let NIGHT_WINDOW = null;
+  let DAY_SPANS = [];
+
+  const VIS_STEP_MIN = 5;
+
+  let YEAR_DATA = null;
+  let YEAR_BAR_HITBOXES = [];
+
+  const loadState = {
+    locations: { ok: false, err: "" },
+    telescopes:{ ok: false, err: "" },
+    cameras:   { ok: false, err: "" },
+    objects:   { ok: false, err: "" }
+  };
+
+  let viewMode = "night";
+  let SHOW_ALL_OBJECTS = false;
+
+  let NAME_QUERY = "";
+
+  // Expand common catalog words so "messier 31" == "m31", "sharpless 2-221" == "sh2-221"
+  function expandCatalogWords(s){
+    return String(s || "")
+      .toLowerCase()
+      .replace(/\bmessier\b/g, "m")
+      .replace(/\bsharpless\b/g, "sh2")
+      .replace(/\bnew\s*general\s*catalog(?:ue)?\b/g, "ngc")
+      .replace(/\bindex\s*catalog(?:ue)?\b/g, "ic")
+      .replace(/\bcaldwell\b/g, "c")
+      .replace(/\bbarnard\b/g, "b");
+  }
+
+  // Normalized "haystack" form (no punctuation/spaces)
+  function normSearch(s){
+    return expandCatalogWords(s).replace(/[^a-z0-9]+/g, "");
+  }
+
+  // Tokenize query so multi-part searches work:
+  // "m 31 andromeda" => ["m","31","andromeda"]
+  function queryTokens(raw){
+    const s = expandCatalogWords(raw);
+    return s.split(/[^a-z0-9]+/g).filter(Boolean);
+  }
+
+  function matchesNameSearch(o){
+    const toks = queryTokens(NAME_QUERY);
+    if (!toks.length) return true;
+
+    const hay = normSearch(`${o?.name ?? ""} ${o?.common_name ?? ""}`);
+
+    // Every token must appear somewhere in name or common name
+    return toks.every(t => hay.includes(normSearch(t)));
+  }
+
+  let aladin = null;
+  let aladinInitStarted = false;
+  let aladinReady = false;
+
+  let HORIZON_PROFILE = null;
+  let HORIZON_MODE = "numeric";
+  let LAST_NUMERIC_HORIZON_DEG = 20;
+
+  let SELECTED_DATE_ISO = null;
+
+  function isMobileNarrow(){ return window.matchMedia("(max-width: 600px)").matches; }
+  function isPhoneLike(){ return window.matchMedia("(max-width: 900px)").matches; }
+  function enforceMobileAltAz(){
+    if (!isMobileNarrow()) return;
+    $("gridAltAz").checked = true;
+    $("gridEqu").checked = false;
+  }
+
+  function pad2(n){ return String(n).padStart(2, "0"); }
+  function ymdToIso(y,m,d){ return `${y}-${pad2(m)}-${pad2(d)}`; }
+
+  function parseIsoYmd(iso){
+    const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return null;
+    return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+  }
+
+  function isoAddDays(iso, deltaDays){
+    const ymd = parseIsoYmd(iso);
+    if (!ymd) return iso;
+    const t = Date.UTC(ymd.y, ymd.m - 1, ymd.d) + (deltaDays * 86400000);
+    const dt = new Date(t);
+    return ymdToIso(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+  }
+
+  function isoToNoonUtcDate(iso){
+    const ymd = parseIsoYmd(iso);
+    if (!ymd) return new Date();
+    return new Date(Date.UTC(ymd.y, ymd.m - 1, ymd.d, 12, 0, 0));
+  }
+
+  function getCurrentLocation(){
+    if (!LOCATIONS?.length) return null;
+    const idx = Number.parseInt($("locationSelect").value, 10);
+    if (Number.isFinite(idx) && LOCATIONS[idx]) return LOCATIONS[idx];
+    return LOCATIONS[0] || null;
+  }
+
+  function getBaseYmdForLocation(loc){
+    const tz = loc?.timezone || "UTC";
+    if (SELECTED_DATE_ISO) {
+      const ymd = parseIsoYmd(SELECTED_DATE_ISO);
+      if (ymd) return ymd;
+    }
+    const ymdNow = getZonedYMD(new Date(), tz);
+    SELECTED_DATE_ISO = ymdToIso(ymdNow.y, ymdNow.m, ymdNow.d);
+    return ymdNow;
+  }
+
+  function formatSelectedDateForDisplay(loc){
+    const tz = loc?.timezone || "UTC";
+    const iso = SELECTED_DATE_ISO || ymdToIso(getZonedYMD(new Date(), tz).y, getZonedYMD(new Date(), tz).m, getZonedYMD(new Date(), tz).d);
+    const dt = isoToNoonUtcDate(iso);
+    const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: tz, weekday:"short", day:"2-digit", month:"short", year:"numeric" });
+    return fmt.format(dt);
+  }
+
+  function updateDateUI(){
+    const loc = getCurrentLocation();
+    const disp = $("dateDisplay");
+    const picker = $("datePicker");
+    if (!loc || !disp || !picker) return;
+
+    getBaseYmdForLocation(loc);
+    disp.textContent = formatSelectedDateForDisplay(loc);
+    picker.value = SELECTED_DATE_ISO || "";
+  }
+
+  async function setSelectedDateIso(newIso, { switchToNight = true } = {}){
+    const ymd = parseIsoYmd(newIso);
+    if (!ymd) return;
+
+    SELECTED_DATE_ISO = newIso;
+    updateDateUI();
+
+    if (switchToNight) {
+      $("viewNight").checked = true;
+      setViewMode("night");
+    }
+
+    await recomputeVisibilityAndRender();
+
+    if (viewMode === "night") drawNightChart();
+    if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+    if (viewMode === "image") updateAladinFromSelection(true);
+    updateCaption();
+  }
+
+  function url(rel) { return new URL(rel, window.location.href); }
+
+  async function fetchJson(relPath) {
+    const res = await fetch(url(relPath), { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    return await res.json();
+  }
+
+  function safe(v) {
+    if (v === null || v === undefined || v === "") return "—";
+    return String(v);
+  }
+
+  function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+  function parseMagnitude(val) {
+    if (val === null || val === undefined) return NaN;
+    if (typeof val === "string" && val.trim() === "") return NaN;
+    const n = Number(val);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
+  function formatMagnitude(val) {
+    const n = parseMagnitude(val);
+    return Number.isFinite(n) ? n.toFixed(2) : "—";
+  }
+
+  function clearAndAddStatusOption(selectEl, text) {
+    selectEl.innerHTML = "";
+    const status = document.createElement("option");
+    status.disabled = true;
+    status.selected = true;
+    status.textContent = text;
+    selectEl.appendChild(status);
+  }
+
+  function fillOptionsIndex(selectEl, items, labelFn) {
+    items.forEach((item, idx) => {
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = labelFn(item);
+      selectEl.appendChild(opt);
+    });
+    if (items.length > 0) selectEl.selectedIndex = 1;
+  }
+
+  function populateSelectWithStatus(selectEl, ok, okText, badText, items, labelFn) {
+    clearAndAddStatusOption(selectEl, ok ? okText : badText);
+    fillOptionsIndex(selectEl, items, labelFn);
+  }
+
+  // -----------------------------
+  // Custom telescope helpers
+  // -----------------------------
+  function debounce(fn, ms){
+    let t = null;
+    return (...args) => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
+  }
+
+  function ensureCustomTelescopeInList(){
+    if (!Array.isArray(TELESCOPES)) TELESCOPES = [];
+    const existing = TELESCOPES.findIndex(t => t && t.is_custom);
+    if (existing >= 0) {
+      CUSTOM_TELESCOPE = TELESCOPES[existing];
+      return existing;
+    }
+    TELESCOPES.push(CUSTOM_TELESCOPE);
+    return TELESCOPES.length - 1;
+  }
+
+  function customTelescopeIndex(){
+    return Array.isArray(TELESCOPES) ? TELESCOPES.findIndex(t => t && t.is_custom) : -1;
+  }
+
+  function isCustomTelescopeSelected(){
+    const sel = $("telescopeSelect");
+    if (!sel) return false;
+    const idx = Number.parseInt(sel.value, 10);
+    return Number.isFinite(idx) && idx === customTelescopeIndex();
+  }
+
+  function updateCustomTelescopeOptionLabel(){
+    const idx = customTelescopeIndex();
+    if (idx < 0) return;
+
+    const sel = $("telescopeSelect");
+    if (!sel) return;
+
+    const opt = sel.querySelector(`option[value="${idx}"]`);
+    if (!opt) return;
+
+    const d = Number(CUSTOM_TELESCOPE.aperture_mm);
+    const f = Number(CUSTOM_TELESCOPE.focal_mm);
+
+    const dTxt = Number.isFinite(d) ? `${Math.round(d)}mm` : "—";
+    const fTxt = Number.isFinite(f) ? `${Math.round(f)}mm` : "—";
+
+    opt.textContent = `Custom telescope (D=${dTxt}, F=${fTxt})`;
+  }
+
+  function updateCustomTelescopeUI(){
+    const wrap = $("customTelescopeFields");
+    if (!wrap) return;
+
+    const show = isCustomTelescopeSelected();
+    wrap.style.display = show ? "" : "none";
+
+    if (show) {
+      const dIn = $("customScopeDiameter");
+      const fIn = $("customScopeFocal");
+      if (dIn) dIn.value = String(Math.round(Number(CUSTOM_TELESCOPE.aperture_mm) || 80));
+      if (fIn) fIn.value = String(Math.round(Number(CUSTOM_TELESCOPE.focal_mm) || 400));
+    }
+
+    updateCustomTelescopeOptionLabel();
+  }
+
+  function updateCustomTelescopeFromInputs(){
+    if (!isCustomTelescopeSelected()) return;
+
+    const dIn = $("customScopeDiameter");
+    const fIn = $("customScopeFocal");
+    if (!dIn || !fIn) return;
+
+    const d = Number(dIn.value);
+    const f = Number(fIn.value);
+
+    if (Number.isFinite(d) && d > 0) CUSTOM_TELESCOPE.aperture_mm = d;
+    if (Number.isFinite(f) && f > 0) CUSTOM_TELESCOPE.focal_mm = f;
+
+    updateCustomTelescopeOptionLabel();
+
+    // Recompute anything depending on focal length (FoV, filtering, Aladin)
+    updateFovLabels();
+    refreshTableOnly();
+
+    if (viewMode === "image") {
+      initAladinIfNeeded();
+      updateAladinFromSelection(true);
+    }
+    updateCaption();
+    updateMobileChartInfo();
+  }
+
+  function wireCustomTelescopeInputs(){
+    const dIn = $("customScopeDiameter");
+    const fIn = $("customScopeFocal");
+    if (!dIn || !fIn) return;
+
+    const onChange = debounce(() => updateCustomTelescopeFromInputs(), 120);
+    dIn.addEventListener("input", onChange);
+    fIn.addEventListener("input", onChange);
+  }
+
+  // -----------------------------
+  // Mobile-only layout tweaks
+  // -----------------------------
+  function updateTableLayoutForMobile(){
+    const mob = isMobileNarrow();
+    const head = $("objectsCardHead");
+    const foot = $("objectsFoot");
+    const typeWrap = $("typeFilterWrap");
+    const searchWrap = $("nameSearchWrap");
+    const hint = $("tableHint");
+
+    if (!head || !foot || !typeWrap || !searchWrap || !hint) return;
+
+    // ✅ ALWAYS keep hint in header
+    if (hint.parentElement !== head) head.appendChild(hint);
+
+    if (mob) {
+      // Move controls to footer on mobile
+      if (typeWrap.parentElement !== foot) foot.appendChild(typeWrap);
+      if (searchWrap.parentElement !== foot) foot.appendChild(searchWrap);
+    } else {
+      // Restore controls to header on desktop (before the hint)
+      if (typeWrap.parentElement !== head) head.insertBefore(typeWrap, hint);
+      if (searchWrap.parentElement !== head) head.insertBefore(searchWrap, hint);
+    }
+  }
+
+  function updateControlsLayoutForMobile(){
+    const mob = isMobileNarrow();
+    const grid = $("setupGrid");
+    const telescopeRow = $("telescopeRow");
+    const horizonRow = $("horizonRow");
+    const reducerRow = $("reducerRow"); // anchor for desktop restore
+
+    if (!grid || !telescopeRow || !horizonRow || !reducerRow) return;
+
+    if (mob) {
+      // move Telescope between Location and Horizon
+      if (telescopeRow.nextElementSibling !== horizonRow) {
+        grid.insertBefore(telescopeRow, horizonRow);
+      }
+    } else {
+      // restore Telescope back before reducer (default desktop order)
+      if (telescopeRow.nextElementSibling !== reducerRow) {
+        grid.insertBefore(telescopeRow, reducerRow);
+      }
+    }
+  }
+
+  function isSmartTelescope(scope) {
+    const n = (scope?.name ?? "").toLowerCase();
+    return !!scope?.is_smart || !!scope?.isSmart || !!scope?.smart ||
+           n.includes("seestar") || n.includes("vespera") || n.includes("dwarf");
+  }
+
+  function getFixedCameraName(scope) {
+    return (scope?.fixed_camera_name || scope?.fixedCameraName || scope?.camera_name || scope?.cameraName || "");
+  }
+
+  function getSelected(selectEl, arr) {
+    const idx = Number.parseInt(selectEl.value, 10);
+    return Number.isFinite(idx) ? arr[idx] : arr[0];
+  }
+
+  function updateMobileSmartScopeUI(){
+    const scope = getSelected($("telescopeSelect"), TELESCOPES);
+    const smart = isSmartTelescope(scope);
+
+    const reducerRow = $("reducerRow");
+    const cameraRow  = $("cameraRow");
+    if (!reducerRow || !cameraRow) return;
+
+    if (isPhoneLike() && smart) {
+      reducerRow.style.display = "none";
+      cameraRow.style.display = "none";
+    } else {
+      reducerRow.style.display = "";
+      cameraRow.style.display = "";
+    }
+  }
+
+  function updateAllResponsiveUI(){
+    enforceMobileAltAz();
+    updateMobileSmartScopeUI();
+    updateControlsLayoutForMobile();
+    updateTableLayoutForMobile();
+    renderObjectsTable(); // ensures merged-name render stays correct when crossing breakpoint
+    updateMobileChartInfo();
+  }
+
+  function isDesktopWide(){ return window.matchMedia("(min-width: 1101px)").matches; }
+
+  // -----------------------------
+  // Horizon profile parsing
+  // -----------------------------
+  function normalizeAz360ForInput(az) {
+    const eps = 1e-9;
+    if (!Number.isFinite(az)) return NaN;
+    if (Math.abs(az - 360) < eps) return 360;
+    let a = az % 360;
+    if (a < 0) a += 360;
+    if (Math.abs(a) < eps && az > 0) return 360;
+    return a;
+  }
+
+  function normalizeAz(az) {
+    let a = az % 360;
+    if (a < 0) a += 360;
+    return a;
+  }
+
+  function extractFirstTwoNumbers(line) {
+    const m = String(line).match(/-?\d+(\.\d+)?/g);
+    if (!m || m.length < 2) return null;
+    const a = Number(m[0]);
+    const b = Number(m[1]);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    return [a, b];
+  }
+
+  function computeAltAt0FromWrap(sortedPtsNo0No360) {
+    if (!sortedPtsNo0No360 || sortedPtsNo0No360.length < 2) return null;
+    const first = sortedPtsNo0No360[0];
+    const last = sortedPtsNo0No360[sortedPtsNo0No360.length - 1];
+    const span = (first.az + 360) - last.az;
+    if (!(span > 0)) return first.alt;
+    const u = (360 - last.az) / span;
+    return last.alt + u * (first.alt - last.alt);
+  }
+
+  function parseHorizonFileText(text, filename = "horizon") {
+    const pts = [];
+    const lines = String(text).split(/\r?\n/);
+
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith("#") || line.startsWith("//")) continue;
+
+      const nums = extractFirstTwoNumbers(line);
+      if (!nums) continue;
+
+      const az = normalizeAz360ForInput(nums[0]);
+      const alt = Number(nums[1]);
+
+      if (!Number.isFinite(az) || !Number.isFinite(alt)) continue;
+      pts.push({ az, alt });
+    }
+
+    if (pts.length < 2) throw new Error("Horizon file must contain at least 2 valid lines with: az_deg, alt_deg (comma/tab/space separated).");
+
+    pts.sort((a,b) => a.az - b.az);
+
+    const dedup = [];
+    for (const p of pts) {
+      if (dedup.length && Math.abs(dedup[dedup.length - 1].az - p.az) < 1e-9) dedup[dedup.length - 1] = p;
+      else dedup.push(p);
+    }
+
+    let has0 = dedup.length && Math.abs(dedup[0].az - 0) < 1e-9;
+    let has360 = dedup.length && Math.abs(dedup[dedup.length - 1].az - 360) < 1e-9;
+
+    const no0no360 = dedup.filter(p => p.az > 0 && p.az < 360);
+
+    let alt0 = null;
+    if (has0) alt0 = dedup[0].alt;
+    else if (has360) alt0 = dedup[dedup.length - 1].alt;
+    else alt0 = computeAltAt0FromWrap(no0no360.length ? no0no360 : dedup);
+
+    if (!Number.isFinite(alt0)) alt0 = dedup[0].alt;
+
+    if (!has0) dedup.unshift({ az: 0, alt: alt0 });
+    if (!has360) dedup.push({ az: 360, alt: alt0 });
+
+    dedup[dedup.length - 1].alt = dedup[0].alt;
+
+    return { filename, points: dedup };
+  }
+
+  function customHorizonAltAtAz(azDeg) {
+    if (!HORIZON_PROFILE) return NaN;
+    const pts = HORIZON_PROFILE.points;
+    const a = normalizeAz(azDeg);
+
+    let lo = 0, hi = pts.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (pts[mid].az <= a) lo = mid;
+      else hi = mid;
+    }
+
+    const p0 = pts[lo];
+    const p1 = pts[hi];
+    const span = (p1.az - p0.az) || 1;
+    const u = (a - p0.az) / span;
+    return p0.alt + u * (p1.alt - p0.alt);
+  }
+
+  function getHorizonFloorDeg() {
+    const v = Number(LAST_NUMERIC_HORIZON_DEG);
+    return Number.isFinite(v) ? v : 20;
+  }
+
+  function getHorizonAtAzFn() {
+    if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
+      return (az) => {
+        const v = customHorizonAltAtAz(az);
+        return Number.isFinite(v) ? v : 0;
+      };
+    }
+    const floor = getHorizonFloorDeg();
+    return (_az) => floor;
+  }
+
+  function rebuildHorizonSelectOptions() {
+    const sel = $("horizonSelect");
+
+    const numeric = [
+      { v:"0",  t:"0°"  },
+      { v:"10", t:"10°" },
+      { v:"20", t:"20°" },
+      { v:"30", t:"30°" },
+      { v:"40", t:"40°" }
+    ];
+
+    sel.innerHTML = "";
+    for (const o of numeric) {
+      const opt = document.createElement("option");
+      opt.value = o.v;
+      opt.textContent = o.t;
+      sel.appendChild(opt);
+    }
+
+    const sep = document.createElement("option");
+    sep.disabled = true;
+    sep.textContent = "— Custom horizon —";
+    sel.appendChild(sep);
+
+    if (HORIZON_PROFILE) {
+      const customOpt = document.createElement("option");
+      customOpt.value = "__custom__";
+      customOpt.textContent = `Custom horizon (${HORIZON_PROFILE.filename})`;
+      sel.appendChild(customOpt);
+    }
+
+    const loadOpt = document.createElement("option");
+    loadOpt.value = "__load__";
+    loadOpt.textContent = HORIZON_PROFILE ? "Load/Replace custom horizon…" : "Load custom horizon…";
+    sel.appendChild(loadOpt);
+
+    const clearOpt = document.createElement("option");
+    clearOpt.value = "__clear__";
+    clearOpt.textContent = "Clear custom horizon";
+    clearOpt.disabled = !HORIZON_PROFILE;
+    sel.appendChild(clearOpt);
+
+    if (HORIZON_MODE === "custom" && HORIZON_PROFILE) sel.value = "__custom__";
+    else {
+      sel.value = String(LAST_NUMERIC_HORIZON_DEG);
+      if (![...sel.options].some(o => o.value === sel.value)) sel.value = "20";
+    }
+  }
+
+  function updateHorizonStatus() {
+    const el = $("horizonFileStatus");
+    if (!el) return;
+
+    if (!HORIZON_PROFILE) {
+      el.textContent = " • No file loaded";
+      if (HORIZON_MODE === "custom") HORIZON_MODE = "numeric";
+    } else {
+      el.textContent = ` • Custom: ${HORIZON_PROFILE.filename}`;
+    }
+
+    rebuildHorizonSelectOptions();
+  }
+
+  // -----------------------------
+  // Smart camera / reducer selects
+  // -----------------------------
+  function rebuildSmartCameraSet() {
+    SMART_CAMERA_NAMES = new Set(
+      (TELESCOPES || [])
+        .filter(t => isSmartTelescope(t))
+        .map(t => getFixedCameraName(t))
+        .filter(Boolean)
+    );
+  }
+
+  function rebuildCameraSelect() {
+    const camSel = $("cameraSelect");
+    const scope = getSelected($("telescopeSelect"), TELESCOPES);
+    const smart = isSmartTelescope(scope);
+
+    if (!loadState.cameras.ok || CAMERAS_ALL.length === 0) {
+      clearAndAddStatusOption(camSel, `❌ Cameras not loaded: ${loadState.cameras.err || "unknown"}`);
+      camSel.disabled = true;
+      return;
+    }
+
+    if (smart) {
+      const fixedName = getFixedCameraName(scope);
+      clearAndAddStatusOption(camSel, "🔒 Camera locked (smart telescope)");
+      const opt = document.createElement("option");
+      opt.value = fixedName || "__unknown_smart_camera__";
+      opt.textContent = fixedName || "Built-in camera";
+      camSel.appendChild(opt);
+      camSel.selectedIndex = 1;
+      camSel.disabled = true;
+      return;
+    }
+
+    const userCameras = CAMERAS_ALL.filter(c => !SMART_CAMERA_NAMES.has(c.name));
+    clearAndAddStatusOption(camSel, `✅ Loaded ${userCameras.length} cameras`);
+    userCameras.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = c.name;
+      opt.textContent = c.name;
+      camSel.appendChild(opt);
+    });
+    if (userCameras.length > 0) camSel.selectedIndex = 1;
+    camSel.disabled = false;
+  }
+
+  function getSelectedCamera() {
+    const scope = getSelected($("telescopeSelect"), TELESCOPES);
+    const smart = isSmartTelescope(scope);
+    if (smart) {
+      const fixedName = getFixedCameraName(scope);
+      return CAMERAS_ALL.find(c => c.name === fixedName) || null;
+    }
+    const name = $("cameraSelect").value;
+    return CAMERAS_ALL.find(c => c.name === name) || null;
+  }
+
+  function rebuildReducerSelect() {
+    const redSel = $("reducerSelect");
+    const scope = getSelected($("telescopeSelect"), TELESCOPES);
+    const smart = isSmartTelescope(scope);
+
+    if (!loadState.telescopes.ok || !Array.isArray(REDUCERS) || REDUCERS.length === 0) {
+      clearAndAddStatusOption(redSel, `❌ Reducers not loaded: ${loadState.telescopes.err || "unknown"}`);
+      redSel.disabled = true;
+      return;
+    }
+
+    if (smart) {
+      const noneIdx = REDUCERS.findIndex(r => Number(r.factor) === 1.0);
+      const locked = noneIdx >= 0 ? REDUCERS[noneIdx] : { factor: 1.0, name: "None (1.0x)" };
+      clearAndAddStatusOption(redSel, "🔒 Locked to 1.0x (smart telescope)");
+      const opt = document.createElement("option");
+      opt.value = String(noneIdx >= 0 ? noneIdx : 0);
+      opt.textContent = locked.name;
+      redSel.appendChild(opt);
+      redSel.selectedIndex = 1;
+      redSel.disabled = true;
+      return;
+    }
+
+    clearAndAddStatusOption(redSel, `✅ Loaded ${REDUCERS.length} reducers`);
+    REDUCERS.forEach((r, idx) => {
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = r.name;
+      redSel.appendChild(opt);
+    });
+    const noneIdx = REDUCERS.findIndex(r => Number(r.factor) === 1.0);
+    if (noneIdx >= 0) redSel.value = String(noneIdx);
+    redSel.disabled = false;
+  }
+
+  function getSelectedReducer() {
+    const idx = Number.parseInt($("reducerSelect").value, 10);
+    return Number.isFinite(idx) ? REDUCERS[idx] : REDUCERS[0];
+  }
+
+  // -----------------------------
+  // Type filter
+  // -----------------------------
+  function buildTypeFilterOptions() {
+    const sel = $("typeFilter");
+    if (!sel || !Array.isArray(OBJECTS)) return;
+
+    const prev = sel.value || "__all__";
+
+    const types = new Set();
+    for (const o of OBJECTS) {
+      const t = String(o?.type ?? "").trim();
+      if (t) types.add(t);
+    }
+    const sorted = Array.from(types).sort((a,b)=>a.localeCompare(b));
+
+    sel.innerHTML = "";
+    const allOpt = document.createElement("option");
+    allOpt.value = "__all__";
+    allOpt.textContent = "All";
+    sel.appendChild(allOpt);
+
+    for (const t of sorted) {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t;
+      sel.appendChild(opt);
+    }
+
+    if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+    else sel.value = "__all__";
+  }
+
+  function currentTypeFilter() {
+    const sel = $("typeFilter");
+    return sel ? sel.value : "__all__";
+  }
+
+  // -----------------------------
+  // Survey auto-defaults (based on Type filter)
+  // -----------------------------
+  const SURVEY_DSS2_COLOR = "P/DSS2/color";
+  const SURVEY_NSNS_OHS   = "https://www.simg.de/nebulae3/dr0_2/ohs8/"; // your nebula default
+
+  function preferredSurveyForTypeFilter(typeFilterValue){
+    if (!typeFilterValue || typeFilterValue === "__all__") return SURVEY_DSS2_COLOR;
+
+    const s = String(typeFilterValue).toLowerCase();
+
+    // galaxy / galaxies -> DSS2
+    if (s.includes("gal")) return SURVEY_DSS2_COLOR;
+
+    // nebula-ish -> NSNS OHS
+    if (s.includes("neb") || s.includes("hii") || s.includes("h ii") || s.includes("pn") || s.includes("planetary")) {
+      return SURVEY_NSNS_OHS;
+    }
+
+    return SURVEY_DSS2_COLOR;
+  }
+
+  function applyPreferredSurveyFromTypeFilter(){
+    const sel = $("surveySelect");
+    if (!sel) return;
+
+    const preferred = preferredSurveyForTypeFilter(currentTypeFilter());
+    if (sel.value !== preferred) sel.value = preferred;
+  }
+
+  // -----------------------------
+  // Sun times + night window
+  // -----------------------------
+  function clamp360(deg) {
+    let x = deg % 360;
+    if (x < 0) x += 360;
+    return x;
+  }
+
+  function julianDay0UTC(y,m,d){
+    if (m <= 2) { y -= 1; m += 12; }
+    const A = Math.floor(y/100);
+    const B = 2 - A + Math.floor(A/4);
+    return Math.floor(365.25*(y + 4716)) + Math.floor(30.6001*(m + 1)) + d + B - 1524.5;
+  }
+
+  function sunParamsForDate(y,m,d){
+    const jd = julianDay0UTC(y,m,d);
+    const t = (jd - 2451545.0) / 36525.0;
+
+    const L0 = clamp360(280.46646 + t*(36000.76983 + t*0.0003032));
+    const M  = clamp360(357.52911 + t*(35999.05029 - 0.0001537*t));
+    const e  = 0.016708634 - t*(0.000042037 + 0.0000001267*t);
+
+    const Mr = M*RAD;
+    const C = (Math.sin(Mr) * (1.914602 - t*(0.004817 + 0.000014*t)))
+            + (Math.sin(2*Mr) * (0.019993 - 0.000101*t))
+            + (Math.sin(3*Mr) * 0.000289);
+
+    const trueLong = L0 + C;
+    const omega = (125.04 - 1934.136*t)*RAD;
+    const lambda = (trueLong - 0.00569 - 0.00478*Math.sin(omega))*RAD;
+
+    const meanObliq = 23 + (26 + ((21.448 - t*(46.815 + t*(0.00059 - t*0.001813))))/60)/60;
+    const obliqCorr = (meanObliq + 0.00256*Math.cos(omega))*RAD;
+
+    const sinDecl = Math.sin(obliqCorr) * Math.sin(lambda);
+    const decl = Math.asin(sinDecl);
+
+    const yterm = Math.tan(obliqCorr/2);
+    const y2 = yterm*yterm;
+
+    const L0r = L0*RAD;
+
+    const eqTime =
+      4 * DEG * (
+        y2*Math.sin(2*L0r) -
+        2*e*Math.sin(Mr) +
+        4*e*y2*Math.sin(Mr)*Math.cos(2*L0r) -
+        0.5*y2*y2*Math.sin(4*L0r) -
+        1.25*e*e*Math.sin(2*Mr)
+      );
+
+    return { decl, eqTimeMin: eqTime };
+  }
+
+  function computeSunriseSunsetUtc(y,m,d,latDeg,lonDeg){
+    const { decl, eqTimeMin } = sunParamsForDate(y,m,d);
+    const lat = latDeg*RAD;
+
+    const cosH =
+      (Math.cos(90.833*RAD) / (Math.cos(lat)*Math.cos(decl))) -
+      (Math.tan(lat)*Math.tan(decl));
+
+    if (cosH > 1 || cosH < -1) {
+      return { sunriseValid:false, sunsetValid:false, sunriseUtc:null, sunsetUtc:null };
+    }
+
+    const H = Math.acos(cosH) * DEG;
+    const solarNoonMin = 720 - 4*lonDeg - eqTimeMin;
+
+    const sunriseMin = solarNoonMin - 4*H;
+    const sunsetMin  = solarNoonMin + 4*H;
+
+    const midnight = Date.UTC(y, m-1, d, 0, 0, 0);
+
+    const sunriseUtc = new Date(midnight + sunriseMin*60000);
+    const sunsetUtc  = new Date(midnight + sunsetMin*60000);
+
+    return { sunriseValid:true, sunsetValid:true, sunriseUtc, sunsetUtc };
+  }
+
+  function getZonedYMD(date, timeZone) {
+    const dtf = new Intl.DateTimeFormat("en-GB", { timeZone, year:"numeric", month:"2-digit", day:"2-digit" });
+    const parts = dtf.formatToParts(date).reduce((acc,p)=>{ acc[p.type]=p.value; return acc; }, {});
+    return { y:Number(parts.year), m:Number(parts.month), d:Number(parts.day) };
+  }
+
+  function formatLocalHM(dateUtc, timeZone){
+    const fmt = new Intl.DateTimeFormat("en-GB", { timeZone, hour:"2-digit", minute:"2-digit", hour12:false });
+    return fmt.format(dateUtc);
+  }
+
+  function dayIndexFromYmd(ymd){
+    return Math.floor(Date.UTC(ymd.y, ymd.m - 1, ymd.d) / 86400000);
+  }
+
+  function formatTimeRangeLocal(startMsUtc, endMsUtc, timeZone){
+    if (startMsUtc == null || endMsUtc == null) return "—";
+
+    const start = formatLocalHM(new Date(startMsUtc), timeZone);
+    const end   = formatLocalHM(new Date(endMsUtc), timeZone);
+
+    const a = getZonedYMD(new Date(startMsUtc), timeZone);
+    const b = getZonedYMD(new Date(endMsUtc), timeZone);
+
+    const dd = dayIndexFromYmd(b) - dayIndexFromYmd(a);
+    const suffix = dd === 0 ? "" : (dd === 1 ? " (+1d)" : ` (+${dd}d)`);
+
+    return `${start}–${end}${suffix}`;
+  }
+
+  function buildNightWindowUtcForYMD(location, y, m, d){
+    const tz = location.timezone;
+    const lat = Number(location.latitude);
+    const lon = Number(location.longitude);
+
+    const today = computeSunriseSunsetUtc(y,m,d,lat,lon);
+    const next = new Date(Date.UTC(y,m-1,d,0,0,0) + 86400000);
+    const y2 = next.getUTCFullYear(), m2 = next.getUTCMonth()+1, d2 = next.getUTCDate();
+    const tomorrow = computeSunriseSunsetUtc(y2,m2,d2,lat,lon);
+
+    if (today.sunsetValid && tomorrow.sunriseValid) {
+      let startUtc = today.sunsetUtc;
+      let endUtc = tomorrow.sunriseUtc;
+      if (endUtc <= startUtc) endUtc = new Date(endUtc.getTime() + 86400000);
+      return { startUtc, endUtc, sunsetLocal: formatLocalHM(startUtc, tz), sunriseLocal: formatLocalHM(endUtc, tz), tz };
+    }
+
+    const guessUtc = Date.UTC(y, m-1, d, 0, 0, 0);
+    return { startUtc: new Date(guessUtc - 6*3600000), endUtc: new Date(guessUtc + 6*3600000), sunsetLocal:"—", sunriseLocal:"—", tz };
+  }
+
+  function buildNightWindowUtc(location){
+    const ymd = getBaseYmdForLocation(location);
+    return buildNightWindowUtcForYMD(location, ymd.y, ymd.m, ymd.d);
+  }
+
+  function buildDaySpansUtc(location){
+    const lat = Number(location.latitude);
+    const lon = Number(location.longitude);
+
+    const base = getBaseYmdForLocation(location);
+    const baseUtc = new Date(Date.UTC(base.y, base.m-1, base.d, 0, 0, 0));
+
+    function ymdFromUtcDate(utcDate){
+      return { y: utcDate.getUTCFullYear(), m: utcDate.getUTCMonth()+1, d: utcDate.getUTCDate() };
+    }
+
+    const dates = [
+      new Date(baseUtc.getTime() - 86400000),
+      baseUtc,
+      new Date(baseUtc.getTime() + 86400000)
+    ];
+
+    const spans = [];
+    for (const dt of dates) {
+      const dd = ymdFromUtcDate(dt);
+      const st = computeSunriseSunsetUtc(dd.y, dd.m, dd.d, lat, lon);
+      if (st.sunriseValid && st.sunsetValid && st.sunsetUtc > st.sunriseUtc) {
+        spans.push({ startMs: st.sunriseUtc.getTime(), endMs: st.sunsetUtc.getTime() });
+      }
+    }
+    return spans;
+  }
+
+  function isDayMs(msUtc){
+    for (const s of DAY_SPANS) {
+      if (msUtc >= s.startMs && msUtc <= s.endMs) return true;
+    }
+    return false;
+  }
+
+  // -----------------------------
+  // Alt/Az
+  // -----------------------------
+  function jdFromDate(date) {
+    return (date.getTime() / 86400000) + 2440587.5;
+  }
+
+  function gmstDeg(jd) {
+    const T = (jd - 2451545.0) / 36525.0;
+    const gmst =
+      280.46061837 +
+      360.98564736629 * (jd - 2451545.0) +
+      0.000387933 * T * T -
+      (T * T * T) / 38710000.0;
+    return clamp360(gmst);
+  }
+
+  function parseNums(str) {
+    const m = String(str).match(/-?\d+(\.\d+)?/g);
+    return m ? m.map(Number) : null;
+  }
+
+  function parseRaDeg(ra) {
+    if (ra == null) return null;
+    if (typeof ra === "number") return ra <= 24 ? ra * 15 : ra;
+    const s = String(ra).trim();
+    if (!s) return null;
+    const nums = parseNums(s);
+    if (!nums || nums.length === 0) return null;
+    if (s.includes("h") || s.includes(":")) {
+      const h = nums[0] ?? 0;
+      const m = nums[1] ?? 0;
+      const sec = nums[2] ?? 0;
+      return (h + m/60 + sec/3600) * 15;
+    }
+    const v = nums[0];
+    return v <= 24 ? v * 15 : v;
+  }
+
+  function parseDecDeg(dec) {
+    if (dec == null) return null;
+    if (typeof dec === "number") return dec;
+    const s = String(dec).trim();
+    if (!s) return null;
+    const nums = parseNums(s);
+    if (!nums || nums.length === 0) return null;
+    const sign = s.startsWith("-") ? -1 : 1;
+    const d = Math.abs(nums[0] ?? 0);
+    const m = nums[1] ?? 0;
+    const sec = nums[2] ?? 0;
+    return sign * (d + m/60 + sec/3600);
+  }
+
+  function raDecToAltAz(utcDate, raDeg, decDeg, latDeg, lonDeg){
+    const jd = jdFromDate(utcDate);
+    const lstDeg = clamp360(gmstDeg(jd) + lonDeg);
+    let H = lstDeg - raDeg;
+    H = ((H + 540) % 360) - 180;
+
+    const sinDec = Math.sin(decDeg*RAD);
+    const cosDec = Math.cos(decDeg*RAD);
+    const sinLat = Math.sin(latDeg*RAD);
+    const cosLat = Math.cos(latDeg*RAD);
+
+    const cosH = Math.cos(H*RAD);
+    const sinH = Math.sin(H*RAD);
+
+    const sinAlt = sinDec*sinLat + cosDec*cosLat*cosH;
+    const altDeg = Math.asin(Math.max(-1, Math.min(1, sinAlt))) * DEG;
+
+    const y = -sinH*cosDec;
+    const x = sinDec*cosLat - cosDec*sinLat*cosH;
+    let azDeg = Math.atan2(y, x) * DEG;
+    if (azDeg < 0) azDeg += 360;
+
+    return { altDeg, azDeg };
+  }
+
+  // Standalone horizon: uses ONLY numeric floor OR ONLY custom profile (no stacking)
+  function computeVisibilityForObjectInWindow(location, horizonAtAzFn, raDeg, decDeg, startUtc, endUtc){
+    const latDeg = Number(location.latitude);
+    const lonDeg = Number(location.longitude);
+
+    const stepSec = Math.max(1, VIS_STEP_MIN) * 60;
+
+    const startMs = startUtc.getTime();
+    const endMs = endUtc.getTime();
+
+    const timesMs = [];
+    for (let t = startMs; t <= endMs; t += stepSec*1000) timesMs.push(t);
+    if (timesMs[timesMs.length - 1] !== endMs) timesMs.push(endMs);
+
+    const n = timesMs.length;
+    const alts = new Array(n);
+    const hzs  = new Array(n);
+
+    let maxAlt = -1e9;
+    for (let i = 0; i < n; i++) {
+      const { altDeg, azDeg } = raDecToAltAz(new Date(timesMs[i]), raDeg, decDeg, latDeg, lonDeg);
+      alts[i] = altDeg;
+      hzs[i] = horizonAtAzFn(azDeg);
+      if (altDeg > maxAlt) maxAlt = altDeg;
+    }
+
+    let visibleSec = 0;
+    let sumAltSec = 0;
+
+    let wasAbove = ((alts[0] - hzs[0]) >= 0);
+    let segStartMs = wasAbove ? timesMs[0] : null;
+
+    let bestDurSec = 0;
+    let bestStart = null;
+    let bestEnd = null;
+
+    for (let i = 0; i < n - 1; i++) {
+      const t0 = timesMs[i];
+      const t1 = timesMs[i+1];
+      const dtSec = (t1 - t0) / 1000;
+
+      const alt0 = alts[i];
+      const alt1 = alts[i+1];
+
+      const hz0 = hzs[i];
+      const hz1 = hzs[i+1];
+
+      const d0 = alt0 - hz0;
+      const d1 = alt1 - hz1;
+
+      const a0 = (d0 >= 0);
+      const a1 = (d1 >= 0);
+
+      if (a0 && a1) {
+        visibleSec += dtSec;
+        sumAltSec += ((alt0 + alt1) * 0.5) * dtSec;
+        continue;
+      }
+      if (!a0 && !a1) continue;
+
+      const denom = (d0 - d1);
+      let u = (denom === 0) ? 0.5 : (d0 / denom);
+      u = clamp(u, 0, 1);
+
+      const tCross = t0 + u * (t1 - t0);
+      const altCross = alt0 + u * (alt1 - alt0);
+
+      if (!a0 && a1) {
+        const dtAbove = (t1 - tCross) / 1000;
+        visibleSec += dtAbove;
+        sumAltSec += ((altCross + alt1) * 0.5) * dtAbove;
+
+        if (!wasAbove) { segStartMs = tCross; wasAbove = true; }
+      } else if (a0 && !a1) {
+        const dtAbove = (tCross - t0) / 1000;
+        visibleSec += dtAbove;
+        sumAltSec += ((alt0 + altCross) * 0.5) * dtAbove;
+
+        if (wasAbove && segStartMs != null) {
+          const segEndMs = tCross;
+          const durSec = Math.max(0, (segEndMs - segStartMs) / 1000);
+          if (durSec > bestDurSec) { bestDurSec = durSec; bestStart = segStartMs; bestEnd = segEndMs; }
+          segStartMs = null;
+          wasAbove = false;
+        }
+      }
+    }
+
+    if (wasAbove && segStartMs != null) {
+      const segEndMs = timesMs[timesMs.length - 1];
+      const durSec = Math.max(0, (segEndMs - segStartMs) / 1000);
+      if (durSec > bestDurSec) { bestDurSec = durSec; bestStart = segStartMs; bestEnd = segEndMs; }
+    }
+
+    const avgAltDeg = (visibleSec > 0) ? (sumAltSec / visibleSec) : null;
+
+    return {
+      visibleSec,
+      totalMinutes: Math.ceil(visibleSec / 60),
+      maxAltDeg: Number.isFinite(maxAlt) ? maxAlt : null,
+      avgAltDeg,
+      bestStartUtcMs: bestStart,
+      bestEndUtcMs: bestEnd
+    };
+  }
+
+  function computeVisibilityForAllObjects(location){
+    NIGHT_WINDOW = buildNightWindowUtc(location);
+    DAY_SPANS = buildDaySpansUtc(location);
+
+    const horizonAtAzFn = getHorizonAtAzFn();
+    const results = new Map();
+
+    for (let idx = 0; idx < OBJECTS.length; idx++) {
+      const o = OBJECTS[idx];
+      const raDeg = parseRaDeg(o.ra);
+      const decDeg = parseDecDeg(o.dec);
+
+      if (raDeg == null || decDeg == null) {
+        results.set(idx, { visibleSec: 0, totalMinutes: 0, maxAltDeg: null, avgAltDeg: null, bestStartUtcMs: null, bestEndUtcMs: null });
+        continue;
+      }
+
+      const r = computeVisibilityForObjectInWindow(
+        location, horizonAtAzFn, raDeg, decDeg,
+        NIGHT_WINDOW.startUtc, NIGHT_WINDOW.endUtc
+      );
+      results.set(idx, r);
+    }
+
+    return results;
+  }
+
+  // -----------------------------
+  // Pixel size filter
+  // -----------------------------
+  function getObjectArcmin(o) {
+    const aRaw = o?.size_major_arcmin;
+    const bRaw = o?.size_minor_arcmin;
+
+    const a = (aRaw === null || aRaw === undefined || aRaw === "") ? NaN : Number(aRaw);
+    const b = (bRaw === null || bRaw === undefined || bRaw === "") ? NaN : Number(bRaw);
+
+    if (Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0) {
+      return { major: Math.max(a, b), minor: Math.min(a, b) };
+    }
+    if (Number.isFinite(a) && a > 0) {
+      return { major: a, minor: a };
+    }
+
+    const sRaw = o?.size;
+    const s = (sRaw === null || sRaw === undefined || sRaw === "") ? NaN : Number(sRaw);
+    if (Number.isFinite(s) && s > 0) return { major: s, minor: s };
+
+    return { major: 0, minor: 0 };
+  }
+
+  function computeImageScaleArcsecPerPixel() {
+    const scope = getSelected($("telescopeSelect"), TELESCOPES);
+    const red = getSelectedReducer();
+    const cam = getSelectedCamera();
+    if (!scope || !red || !cam) return null;
+
+    const effFocal = Number(scope.focal_mm) * Number(red.factor);
+    const px = Number(cam.pixel_um);
+    if (!Number.isFinite(effFocal) || effFocal <= 0 || !Number.isFinite(px) || px <= 0) return null;
+
+    return 206.265 * px / effFocal; // internal arcsec/px
+  }
+
+  function objectPixelsMajor(o, scaleArcsecPerPx) {
+    const { major } = getObjectArcmin(o);
+    const majorArcsec = major * 60;
+    const majorPx = (scaleArcsecPerPx > 0) ? (majorArcsec / scaleArcsecPerPx) : 0;
+    return majorPx;
+  }
+
+  function getMinSizePercent(){
+    const el = $("minSizePercent");
+    const v = Number(el?.value ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  }
+
+  function sensorPixelsMax(){
+    const cam = getSelectedCamera();
+    if (!cam) return null;
+
+    const wmm = Number(cam.sensor_w_mm);
+    const hmm = Number(cam.sensor_h_mm);
+    const pxu = Number(cam.pixel_um);
+
+    if (![wmm,hmm,pxu].every(Number.isFinite) || pxu <= 0) return null;
+
+    const wpx = (wmm * 1000) / pxu;
+    const hpx = (hmm * 1000) / pxu;
+    return Math.max(wpx, hpx);
+  }
+
+  function minSizePixelsThreshold(){
+    const maxPx = sensorPixelsMax();
+    if (!Number.isFinite(maxPx)) return 0;
+    return (getMinSizePercent() / 100) * maxPx;
+  }
+
+  function applyFilters() {
+    const tf = currentTypeFilter();
+
+    // ✅ Show ALL objects (still respects Type dropdown)
+    if (SHOW_ALL_OBJECTS) {
+      FILTERED_INDICES = [];
+      for (let idx = 0; idx < OBJECTS.length; idx++) {
+        const o = OBJECTS[idx];
+
+        // ✅ name/common-name search
+        if (!matchesNameSearch(o)) continue;
+
+        if (tf !== "__all__") {
+          const t = String(o?.type ?? "");
+          if (t !== tf) continue;
+        }
+        FILTERED_INDICES.push(idx);
+      }
+      return;
+    }
+
+    // ✅ Normal filtered mode (your original logic)
+    const scale = computeImageScaleArcsecPerPixel();
+    const minPx = minSizePixelsThreshold();
+
+    if (!scale) { FILTERED_INDICES = []; return; }
+
+    FILTERED_INDICES = [];
+    for (let idx = 0; idx < OBJECTS.length; idx++) {
+      const o = OBJECTS[idx];
+
+      // ✅ name/common-name search
+      if (!matchesNameSearch(o)) continue;
+
+      const visSec = VIS_RESULTS.get(idx)?.visibleSec ?? 0;
+      if (visSec <= 0) continue;
+
+      if (tf !== "__all__") {
+        const t = String(o?.type ?? "");
+        if (t !== tf) continue;
+      }
+
+      const majorPx = objectPixelsMajor(o, scale);
+      if (!(majorPx >= minPx)) continue;
+
+      FILTERED_INDICES.push(idx);
+    }
+  }
+
+  // -----------------------------
+  // FoV labels (degrees + arcminutes)
+  // -----------------------------
+  function calcFovDegrees(sensor_mm, focal_mm) {
+    return (2 * Math.atan(sensor_mm / (2 * focal_mm))) * DEG;
+  }
+
+  function computeRigFovDegNullable(mosaicFactor){
+    const scope = getSelected($("telescopeSelect"), TELESCOPES);
+    const red = getSelectedReducer();
+    const cam = getSelectedCamera();
+    if (!scope || !red || !cam) return null;
+
+    const effFocal = Number(scope.focal_mm) * Number(red.factor);
+    if (!Number.isFinite(effFocal) || effFocal <= 0) return null;
+
+    const fovW = calcFovDegrees(Number(cam.sensor_w_mm), effFocal);
+    const fovH = calcFovDegrees(Number(cam.sensor_h_mm), effFocal);
+
+    const mosaic = Number(mosaicFactor) || 1;
+
+    let f = Math.max(fovW, fovH) * mosaic;
+    if (!Number.isFinite(f) || f <= 0) return null;
+
+    f = Math.max(0.05, Math.min(60, f));
+    return f;
+  }
+
+  function computeRigFovDeg() {
+    const mosaic = Number($("mosaicRange").value) || 1;
+    return computeRigFovDegNullable(mosaic) ?? 2.0;
+  }
+
+  function formatDegArcmin(deg){
+    if (!Number.isFinite(deg)) return "—";
+    const arcmin = deg * 60;
+    return `${deg.toFixed(2)}° / ${arcmin.toFixed(1)}′`;
+  }
+
+  function updateFovLabels(){
+    const pct = getMinSizePercent();
+    const minPx = minSizePixelsThreshold();
+
+    const scaleArcsecPerPx = computeImageScaleArcsecPerPixel();
+    const minDeg = Number.isFinite(scaleArcsecPerPx) ? (minPx * scaleArcsecPerPx / 3600) : NaN;
+
+    const mosaic = Number($("mosaicRange").value) || 1;
+    const mosaicFovDeg = computeRigFovDegNullable(mosaic);
+
+    const infoEl = $("minSizeInfo");
+    const pillEl = $("minSizePill");
+    const mosEl  = $("mosaicFovLabel");
+
+    if (pillEl) pillEl.textContent = `${pct.toFixed(1)}%`;
+
+    if (infoEl) {
+      const pxTxt = Number.isFinite(minPx) ? `${Math.round(minPx)} px` : "—";
+      const angTxt = Number.isFinite(minDeg) ? formatDegArcmin(minDeg) : "—";
+      infoEl.textContent = ` • ≈ ${pxTxt} • ${angTxt}`;
+    }
+
+    if (mosEl) mosEl.textContent = ` • FoV: ${formatDegArcmin(mosaicFovDeg)}`;
+  }
+
+  // -----------------------------
+  // Table rendering & sorting
+  // -----------------------------
+  function formatSize(o) {
+    const { major, minor } = getObjectArcmin(o);
+    if (major > 0) {
+      if (minor > 0 && minor !== major) return `${major.toFixed(1)}′ × ${minor.toFixed(1)}′`;
+      return `${major.toFixed(1)}′`;
+    }
+    return "—";
+  }
+
+  function sizeNumeric(o) {
+    const { major } = getObjectArcmin(o);
+    return Number.isFinite(major) ? major : 0;
+  }
+
+  function setHeaderArrows() {
+    const keys = ["name","common_name","magnitude","size","type","subtype","visibility"];
+
+    for (const k of keys) {
+      const el = document.getElementById(`arrow-${k}`);
+      if (el) el.textContent = (sortState.key === k) ? ((sortState.dir === "asc") ? "▲" : "▼") : "";
+    }
+    // mobile visibility arrow (second col)
+    const vm = document.getElementById("arrow-visibility-m");
+    if (vm) vm.textContent = (sortState.key === "visibility") ? ((sortState.dir === "asc") ? "▲" : "▼") : "";
+  }
+
+  function sortLabel() {
+    const map = { name:"Name", common_name:"Common Name", magnitude:"Mag", size:"Size", type:"Type", subtype:"Subtype", visibility:"Visibility" };
+    return `${map[sortState.key] || sortState.key} (${sortState.dir === "asc" ? "ascending" : "descending"})`;
+  }
+
+  function getSortValue(idx, key) {
+    const o = OBJECTS[idx];
+    switch (key) {
+      case "visibility": return VIS_RESULTS.get(idx)?.visibleSec ?? 0;
+      case "magnitude": {
+        const m = parseMagnitude(o?.magnitude);
+        return Number.isFinite(m) ? m : 99;
+      }
+      case "size": return sizeNumeric(o);
+      case "name": return String(o?.name ?? "").toLowerCase();
+      case "common_name": return String(o?.common_name ?? "").toLowerCase();
+      case "type": return String(o?.type ?? "").toLowerCase();
+      case "subtype": return String(o?.subtype ?? "").toLowerCase();
+      default: return "";
+    }
+  }
+
+  function compareIdx(a, b) {
+    if (sortState.key === "visibility") {
+      const ra = Math.round(VIS_RESULTS.get(a)?.visibleSec ?? 0);
+      const rb = Math.round(VIS_RESULTS.get(b)?.visibleSec ?? 0);
+      if (ra !== rb) return (sortState.dir === "asc") ? (ra - rb) : (rb - ra);
+
+      const aa = VIS_RESULTS.get(a)?.avgAltDeg;
+      const ab = VIS_RESULTS.get(b)?.avgAltDeg;
+      const aAvg = Number.isFinite(aa) ? aa : -1e9;
+      const bAvg = Number.isFinite(ab) ? ab : -1e9;
+      if (aAvg !== bAvg) return (bAvg - aAvg);
+
+      const ma = VIS_RESULTS.get(a)?.maxAltDeg;
+      const mb = VIS_RESULTS.get(b)?.maxAltDeg;
+      const aMax = Number.isFinite(ma) ? ma : -1e9;
+      const bMax = Number.isFinite(mb) ? mb : -1e9;
+      if (aMax !== bMax) return (bMax - aMax);
+
+      return String(OBJECTS[a]?.name ?? "").localeCompare(String(OBJECTS[b]?.name ?? ""));
+    }
+
+    const ka = getSortValue(a, sortState.key);
+    const kb = getSortValue(b, sortState.key);
+
+    let cmp = 0;
+    if (typeof ka === "number" && typeof kb === "number") cmp = ka - kb;
+    else cmp = String(ka).localeCompare(String(kb));
+
+    if (cmp === 0) {
+      const va = VIS_RESULTS.get(a)?.visibleSec ?? 0;
+      const vb = VIS_RESULTS.get(b)?.visibleSec ?? 0;
+      cmp = vb - va;
+      if (cmp === 0) cmp = String(OBJECTS[a]?.name ?? "").localeCompare(String(OBJECTS[b]?.name ?? ""));
+    }
+
+    return (sortState.dir === "asc") ? cmp : -cmp;
+  }
+
+  function formatMobileMergedName(o){
+    const n = safe(o?.name);
+    const cn = String(o?.common_name ?? "").trim();
+    if (isMobileNarrow() && cn) return `${n} (${cn})`;
+    return n;
+  }
+
+  function renderObjectsTable() {
+    const tbody = $("objectsTbody");
+    tbody.innerHTML = "";
+
+    for (const idx of FILTERED_INDICES) {
+      const o = OBJECTS[idx];
+      const visSec = VIS_RESULTS.get(idx)?.visibleSec ?? 0;
+      const visH = visSec / 3600;
+
+      const tr = document.createElement("tr");
+      tr.dataset.idx = String(idx);
+      if (idx === selectedObjectIdx) tr.classList.add("selected");
+
+      tr.innerHTML = `
+        <td class="mono">${formatMobileMergedName(o)}</td>
+
+        <!-- mobile visibility (2nd col) -->
+        <td class="vis-cell mobile-only">${visH.toFixed(2)}h</td>
+
+        <td class="desktop-only">${safe(o.common_name)}</td>
+        <td>${formatMagnitude(o.magnitude)}</td>
+        <td>${formatSize(o)}</td>
+        <td>${safe(o.type)}</td>
+        <td class="desktop-only">${safe(o.subtype)}</td>
+
+        <!-- desktop visibility (last col) -->
+        <td class="vis-cell desktop-only">${visH.toFixed(2)}h</td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    setHeaderArrows();
+  }
+
+  function refreshTableOnly() {
+    applyFilters();
+    FILTERED_INDICES.sort(compareIdx);
+
+    if (FILTERED_INDICES.length === 0) {
+      $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">No objects match your filters.</td></tr>`;
+      setHeaderArrows();
+      selectedObjectIdx = null;
+      if (viewMode === "night") drawNightChart();
+      if (viewMode === "year") { YEAR_DATA = null; drawYearChart(); }
+      if (viewMode === "image") updateAladinFromSelection(true);
+      updateCaption();
+      updateMobileChartInfo();
+      return;
+    }
+
+    if (selectedObjectIdx == null || !FILTERED_INDICES.includes(selectedObjectIdx)) {
+      selectedObjectIdx = FILTERED_INDICES[0];
+    }
+
+    renderObjectsTable();
+
+    if (viewMode === "night") drawNightChart();
+    if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+    if (viewMode === "image") updateAladinFromSelection(true);
+
+    updateCaption();
+    updateMobileChartInfo();
+  }
+
+  // -----------------------------
+  // Status + recompute
+  // -----------------------------
+  async function recomputeVisibilityAndRender() {
+    const loc = getSelected($("locationSelect"), LOCATIONS);
+    updateDateUI();
+
+    $("objectsStatus").textContent = "⏳ Calculating visibility…";
+    $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">Calculating…</td></tr>`;
+
+    await new Promise(r => setTimeout(r, 0));
+
+    VIS_RESULTS = computeVisibilityForAllObjects(loc);
+
+    buildTypeFilterOptions();
+    refreshTableOnly();
+
+    updateObjectsStatus();
+  }
+
+  // -----------------------------
+  // Caption + mobile chart info
+  // -----------------------------
+  function getSelectedObjectSafe() {
+    if (selectedObjectIdx == null) return null;
+    return OBJECTS?.[selectedObjectIdx] ?? null;
+  }
+
+  function getObjectDisplayNamePlain(obj){
+    if (!obj) return "—";
+    const n = safe(obj.name);
+    const cn = String(obj.common_name ?? "").trim();
+    return cn ? `${n} (${safe(cn)})` : n;
+  }
+
+  function getGridMode(){
+    if (isMobileNarrow()) return "altaz";
+    return $("gridEqu").checked ? "equ" : "altaz";
+  }
+
+  function buildTonightData(loc){
+    const tz = NIGHT_WINDOW?.tz || loc?.timezone || "UTC";
+    const vis = (selectedObjectIdx != null) ? VIS_RESULTS.get(selectedObjectIdx) : null;
+
+    const visH = vis ? (vis.visibleSec / 3600) : 0;
+
+    const sunsetSunrise = (NIGHT_WINDOW?.startUtc && NIGHT_WINDOW?.endUtc)
+      ? formatTimeRangeLocal(NIGHT_WINDOW.startUtc.getTime(), NIGHT_WINDOW.endUtc.getTime(), tz)
+      : "—";
+
+    const bestWindow = (vis?.bestStartUtcMs != null && vis?.bestEndUtcMs != null)
+      ? formatTimeRangeLocal(vis.bestStartUtcMs, vis.bestEndUtcMs, tz)
+      : "—";
+
+    const maxAlt = (vis && vis.maxAltDeg != null) ? vis.maxAltDeg : null;
+
+    return { tz, visH, sunsetSunrise, bestWindow, maxAlt };
+  }
+
+  function updateMobileChartInfo(){
+    const box = $("mobileChartInfo");
+    if (!box) return;
+
+    const mob = isMobileNarrow();
+    const loc = getSelected($("locationSelect"), LOCATIONS);
+    const obj = getSelectedObjectSafe();
+
+    if (!mob || viewMode !== "night" || !loc || !obj) {
+      box.style.display = "none";
+      box.innerHTML = "";
+      return;
+    }
+
+    const d = buildTonightData(loc);
+
+    box.innerHTML = `
+      <div class="t1">${safe(getObjectDisplayNamePlain(obj))}</div>
+      <div class="t2">
+        Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
+        &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
+        &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
+        ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}
+      </div>
+    `;
+    box.style.display = "";
+  }
+
+  function buildImageTopLine(obj) {
+    const raDeg = obj ? parseRaDeg(obj.ra) : null;
+    const decDeg = obj ? parseDecDeg(obj.dec) : null;
+
+    const surveyLabel = $("surveySelect")?.selectedOptions?.[0]?.textContent || $("surveySelect")?.value || "—";
+    const fovDeg = computeRigFovDeg();
+
+    const raTxt = (raDeg == null) ? "—" : `${raDeg.toFixed(4)}°`;
+    const decTxt = (decDeg == null) ? "—" : `${decDeg.toFixed(4)}°`;
+
+    return `Sky Image (Aladin): <code>${safe(surveyLabel)}</code> • Center: RA <code>${raTxt}</code>, Dec <code>${decTxt}</code> • FoV ≈ <code>${fovDeg.toFixed(2)}°</code>`;
+  }
+
+  function formatNameWithOptionalCommon(obj){
+    if (!obj) return "—";
+    const n = safe(obj.name);
+    const cn = String(obj.common_name ?? "").trim();
+    return cn ? `${n} (${cn})` : n;
+  }
+
+  function updateCaption() {
+    const cap = $("chartCaption");
+    const loc = getSelected($("locationSelect"), LOCATIONS);
+    const obj = getSelectedObjectSafe();
+
+    if (!loc || !obj) {
+      if (viewMode === "image") cap.textContent = "Sky Image (Aladin): select an object to view its field.";
+      else if (viewMode === "year") cap.textContent = "Monthly Visibility: select an object to compute monthly totals.";
+      else cap.textContent = "Select an object to view: Tonight’s Visibility, Sky Image (Aladin), or Monthly Visibility.";
+      return;
+    }
+
+    const nameLine = (typeof formatNameWithOptionalCommon === "function")
+      ? formatNameWithOptionalCommon(obj)
+      : getObjectDisplayNamePlain(obj);
+
+    // ---------- TONIGHT ----------
+    if (viewMode === "night") {
+      // Mobile stays compact (mobile already shows the detailed box above the canvas)
+      if (isMobileNarrow()) {
+        cap.innerHTML = `<span class="muted">Tip: tap an object row to update the chart.</span>`;
+        return;
+      }
+
+      // Desktop: restore full info underneath the chart
+      const d = buildTonightData(loc);
+
+      cap.innerHTML = `
+        <div><strong>Tonight’s Visibility</strong> • ${nameLine}</div>
+        <div style="margin-top:4px;">
+          Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
+          &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
+          &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
+          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}
+        </div>
+      `;
+      return;
+    }
+
+    // ---------- IMAGE (ALADIN) ----------
+    if (viewMode === "image") {
+      const topLine = buildImageTopLine(obj);
+
+      // Mobile stays compact
+      if (isMobileNarrow()) {
+        cap.innerHTML = `<div><strong>${topLine}</strong></div>`;
+        return;
+      }
+
+      // Desktop: Aladin top line + repeat Tonight summary
+      const d = buildTonightData(loc);
+
+      cap.innerHTML = `
+        <div><strong>${topLine}</strong></div>
+
+        <div style="margin-top:6px;">
+          <strong>Tonight’s Visibility</strong> • ${nameLine}
+        </div>
+
+        <div style="margin-top:4px;">
+          Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
+          &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
+          &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
+          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}
+        </div>
+      `;
+      return;
+    }
+
+    // ---------- MONTHLY ----------
+    computeYearIfPossible();
+    if (!YEAR_DATA) {
+      cap.textContent = "Monthly Visibility: select an object to compute monthly totals.";
+      return;
+    }
+
+    const mins = YEAR_DATA.months || [];
+    const maxMins = Math.max(0, ...mins);
+    const bestMonthIdx = mins.indexOf(maxMins);
+    const monthsShort = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const bestLabel = (bestMonthIdx >= 0) ? monthsShort[bestMonthIdx] : "—";
+    const maxH = maxMins / 60;
+
+    cap.innerHTML = `
+      <div><strong>Monthly Visibility</strong> • ${nameLine}</div>
+      <div style="margin-top:4px;">
+        Year: <code>${YEAR_DATA.year}</code>
+        &nbsp;•&nbsp; Best month (mid-month sample): <code>${bestLabel}</code>
+        &nbsp;•&nbsp; Max: <code>${maxH.toFixed(2)}h</code>
+      </div>
+    `;
+  }
+
+  // -----------------------------
+  // View switching
+  // -----------------------------
+  function setViewMode(mode) {
+    viewMode = mode;
+
+    const nightPane = $("nightPane");
+    const imagePane = $("imagePane");
+    const yearPane  = $("yearPane");
+
+    const nightOnly = document.querySelectorAll(".night-only");
+    const surveyWrap = $("surveyWrap");
+    const chartTitleText = $("chartTitleText");
+
+    if (mode === "night") {
+      nightPane.style.display = "";
+      imagePane.style.display = "none";
+      yearPane.style.display  = "none";
+      nightOnly.forEach(el => el.style.display = "inline-flex");
+      $("sepNight").style.display = "inline-flex";
+      surveyWrap.style.display = "none";
+      chartTitleText.textContent = "Tonight’s Visibility";
+      updateDateUI();
+      updateAllResponsiveUI();
+      drawNightChart();
+      updateCaption();
+      return;
+    }
+
+    if (mode === "image") {
+      nightPane.style.display = "none";
+      imagePane.style.display = "";
+      yearPane.style.display  = "none";
+      nightOnly.forEach(el => el.style.display = "none");
+      $("sepNight").style.display = "none";
+      surveyWrap.style.display = "flex";
+      chartTitleText.textContent = "Sky Image (Aladin)";
+      initAladinIfNeeded();
+      updateAllResponsiveUI();
+      updateCaption();
+      setTimeout(() => updateAladinFromSelection(true), 60);
+      return;
+    }
+
+    nightPane.style.display = "none";
+    imagePane.style.display = "none";
+    yearPane.style.display  = "";
+    nightOnly.forEach(el => el.style.display = "none");
+    $("sepNight").style.display = "none";
+    surveyWrap.style.display = "none";
+    chartTitleText.textContent = "Monthly Visibility";
+    updateAllResponsiveUI();
+    computeYearIfPossible();
+    drawYearChart();
+    updateCaption();
+  }
+
+  // -----------------------------
+  // Chart drawing (Tonight)
+  // -----------------------------
+  function prepareCanvas(canvas, minCssH) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const cssW = rect.width;
+
+    // On desktop we set canvas height via CSS (var(--viewerH)), so respect it.
+    const desktop = isDesktopWide();
+    let cssH = rect.height;
+
+    // Fallback: if height isn't meaningful (mobile or not yet laid out), use old logic.
+    if (!desktop || !(cssH > 80)) {
+      const isPhone = isMobileNarrow();
+      const isLandscape = window.matchMedia("(orientation: landscape)").matches;
+
+      let maxH = 9999;
+      if (isPhone && !isLandscape) maxH = Math.min(280, Math.floor(window.innerHeight * 0.34));
+      if (isPhone && isLandscape)  maxH = Math.min(260, Math.floor(window.innerHeight * 0.68));
+
+      const desired = Math.floor(cssW);
+      cssH = Math.min(
+        maxH,
+        Math.max(isPhone ? 220 : minCssH, Math.min(desired, minCssH))
+      );
+
+      canvas.style.height = cssH + "px"; // only set inline on mobile fallback
+    } else {
+      cssH = Math.floor(cssH);
+    }
+
+    const w = Math.floor(cssW * dpr);
+    const h = Math.floor(cssH * dpr);
+
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w: cssW, h: cssH };
+  }
+
+  function projectAltAz(altDeg, azDeg, cx, cy, radiusMax) {
+    const z = 90 - altDeg;
+    const r = (z / 90) * radiusMax;
+    const a = azDeg * RAD;
+    return { x: cx + r * Math.sin(a), y: cy - r * Math.cos(a) };
+  }
+
+  function drawAltAzGrid(ctx, cx, cy, radiusMax) {
+    ctx.save();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.lineWidth = 2.2;
+    ctx.setLineDash([7, 7]);
+    for (let alt = 15; alt <= 75; alt += 15) {
+      const r = ((90-alt)/90) * radiusMax;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    ctx.lineWidth = 2.0;
+    ctx.setLineDash([6, 9]);
+    for (let az = 0; az < 360; az += 45) {
+      if (az === 0 || az === 90 || az === 180 || az === 270) continue;
+      const edge = projectAltAz(0, az, cx, cy, radiusMax);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(edge.x, edge.y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.font = "15px ui-sans-serif, system-ui";
+
+    for (let alt = 15; alt <= 75; alt += 15) {
+      const r = ((90-alt)/90) * radiusMax;
+      ctx.fillText(`${alt}°`, cx + 8, cy - r - 8);
+    }
+
+    const labelR = radiusMax + 22;
+    for (let az = 0; az < 360; az += 45) {
+      if (az === 0 || az === 90 || az === 180 || az === 270) continue;
+      const a = az * RAD;
+      const x = cx + labelR * Math.sin(a);
+      const y = cy - labelR * Math.cos(a);
+      ctx.fillText(String(az), x - 10, y + 5);
+    }
+
+    ctx.restore();
+  }
+
+  function drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(160,200,140,0.98)";
+    ctx.lineWidth = 3.0;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+
+    let first = true;
+    for (let az = 0; az <= 360; az += 2) {
+      const alt = horizonAtAzFn(az);
+      const p = projectAltAz(alt, az, cx, cy, radiusMax);
+      if (first) { ctx.moveTo(p.x, p.y); first = false; }
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawNumericHorizonCircle(ctx, cx, cy, radiusMax, horizonDeg) {
+    const rH = ((90 - horizonDeg)/90) * radiusMax;
+    ctx.setLineDash([7, 7]);
+    ctx.strokeStyle = "rgba(160,200,140,0.92)";
+    ctx.lineWidth = 2.8;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rH, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawNightChart() {
+    if (viewMode !== "night") return;
+
+    const canvas = $("skyCanvas");
+    const loc = getSelected($("locationSelect"), LOCATIONS);
+    const horizonAtAzFn = getHorizonAtAzFn();
+
+    if (!canvas || !loc || selectedObjectIdx == null || !OBJECTS[selectedObjectIdx] || !NIGHT_WINDOW) return;
+
+    const obj = OBJECTS[selectedObjectIdx];
+    const raDeg = parseRaDeg(obj.ra);
+    const decDeg = parseDecDeg(obj.dec);
+    if (raDeg == null || decDeg == null) return;
+
+    enforceMobileAltAz();
+    // (gridMode currently unused; kept for future expansion)
+    void getGridMode();
+
+    const { ctx, w, h } = prepareCanvas(canvas, 380);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(0,0,0,0.10)";
+    ctx.fillRect(0, 0, w, h);
+
+    const cx = w/2;
+    const cy = h/2;
+    const radiusMax = 0.46 * Math.min(w, h);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.28)";
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radiusMax, 0, Math.PI*2);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,0.86)";
+    ctx.font = "16px ui-sans-serif, system-ui";
+    const pad = 12;
+    ctx.fillText("N", cx - 6, cy - radiusMax - pad);
+    ctx.fillText("S", cx - 6, cy + radiusMax + pad + 16);
+    ctx.fillText("E", cx + radiusMax + pad, cy + 6);
+    ctx.fillText("W", cx - radiusMax - pad - 14, cy + 6);
+
+    // Grid
+    drawAltAzGrid(ctx, cx, cy, radiusMax);
+
+    // Horizon visualisation
+    if (HORIZON_MODE === "custom" && HORIZON_PROFILE) drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
+    else drawNumericHorizonCircle(ctx, cx, cy, radiusMax, getHorizonFloorDeg());
+
+    const sunsetMs = NIGHT_WINDOW.startUtc.getTime();
+    const sunriseMs = NIGHT_WINDOW.endUtc.getTime();
+
+    let trackStart = sunsetMs;
+    let trackEnd = sunriseMs;
+    const minSpan = 24*3600000;
+    const span = trackEnd - trackStart;
+
+    if (span < minSpan) {
+      const extra = Math.floor((minSpan - span) / 2);
+      trackStart -= extra;
+      trackEnd += extra;
+    }
+
+    const latDeg = Number(loc.latitude);
+    const lonDeg = Number(loc.longitude);
+    const stepMs = Math.max(1, VIS_STEP_MIN) * 60 * 1000;
+
+    const pts = [];
+    for (let t = trackStart; t <= trackEnd; t += stepMs) {
+      const { altDeg, azDeg } = raDecToAltAz(new Date(t), raDeg, decDeg, latDeg, lonDeg);
+      pts.push({ t, altDeg, azDeg });
+    }
+    if (pts.length === 0 || pts[pts.length-1].t !== trackEnd) {
+      const { altDeg, azDeg } = raDecToAltAz(new Date(trackEnd), raDeg, decDeg, latDeg, lonDeg);
+      pts.push({ t: trackEnd, altDeg, azDeg });
+    }
+
+    function strokeSegment(p0, p1, color){
+      const a0 = projectAltAz(p0.altDeg, p0.azDeg, cx, cy, radiusMax);
+      const a1 = projectAltAz(p1.altDeg, p1.azDeg, cx, cy, radiusMax);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.9;
+      ctx.beginPath();
+      ctx.moveTo(a0.x, a0.y);
+      ctx.lineTo(a1.x, a1.y);
+      ctx.stroke();
+    }
+
+    for (let i = 1; i < pts.length; i++) {
+      const A = pts[i-1];
+      const B = pts[i];
+      const midT = (A.t + B.t) / 2;
+
+      const mid = raDecToAltAz(new Date(midT), raDeg, decDeg, latDeg, lonDeg);
+      const hMid = horizonAtAzFn(mid.azDeg);
+      if (mid.altDeg < hMid) continue;
+
+      const day = isDayMs(midT);
+      const col = day ? "rgba(255,200,90,0.62)" : "rgba(120,170,255,0.92)";
+      strokeSegment(A, B, col);
+    }
+
+    // current position marker (only if above horizon)
+    {
+      const now = Date.now();
+      const { altDeg, azDeg } = raDecToAltAz(new Date(now), raDeg, decDeg, latDeg, lonDeg);
+      const hNow = horizonAtAzFn(azDeg);
+
+      if (altDeg >= hNow) {
+        const xy = projectAltAz(altDeg, azDeg, cx, cy, radiusMax);
+        ctx.strokeStyle = "rgba(255,80,80,0.95)";
+        ctx.lineWidth = 2.3;
+        ctx.beginPath();
+        ctx.arc(xy.x, xy.y, 7, 0, Math.PI*2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // -----------------------------
+  // Monthly visibility
+  // -----------------------------
+  function computeYearIfPossible() {
+    const loc = getSelected($("locationSelect"), LOCATIONS);
+    if (!loc || selectedObjectIdx == null || !OBJECTS[selectedObjectIdx]) { YEAR_DATA = null; return; }
+
+    const obj = OBJECTS[selectedObjectIdx];
+    const raDeg = parseRaDeg(obj.ra);
+    const decDeg = parseDecDeg(obj.dec);
+    if (raDeg == null || decDeg == null) { YEAR_DATA = null; return; }
+
+    const base = getBaseYmdForLocation(loc);
+    const year = base.y;
+    const currentMonthIdx = clamp(base.m - 1, 0, 11);
+
+    const horizonAtAzFn = getHorizonAtAzFn();
+    const months = [];
+    const maxAltByMonth = [];
+
+    for (let month = 1; month <= 12; month++) {
+      const day = 15;
+      const win = buildNightWindowUtcForYMD(loc, year, month, day);
+      const r = computeVisibilityForObjectInWindow(loc, horizonAtAzFn, raDeg, decDeg, win.startUtc, win.endUtc);
+      months.push(Math.max(0, r.totalMinutes || 0));
+      maxAltByMonth.push((r.maxAltDeg != null && Number.isFinite(r.maxAltDeg)) ? r.maxAltDeg : null);
+    }
+
+    YEAR_DATA = { year, months, maxAltByMonth, currentMonthIdx };
+  }
+
+  function drawYearChart() {
+    if (viewMode !== "year") return;
+
+    const canvas = $("yearCanvas");
+    if (!canvas) return;
+
+    const { ctx, w, h } = prepareCanvas(canvas, 380);
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = "rgba(0,0,0,0.10)";
+    ctx.fillRect(0, 0, w, h);
+
+    YEAR_BAR_HITBOXES = [];
+
+    if (!YEAR_DATA) {
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.font = "16px ui-sans-serif, system-ui";
+      ctx.fillText("Select an object to compute Monthly Visibility.", 18, 34);
+      return;
+    }
+
+    const mins = YEAR_DATA.months;
+    const maxMins = Math.max(0, ...mins);
+
+    const maxH = maxMins / 60;
+    const yMaxH = Math.max(2, Math.ceil(maxH / 2) * 2);
+    const yMaxMins = yMaxH * 60;
+
+    const left = 56;
+    const top = 34;
+    const right = w - 18;
+    const bottom = h - 54;
+
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(left, top);
+    ctx.lineTo(left, bottom);
+    ctx.lineTo(right, bottom);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.font = "13px ui-sans-serif, system-ui";
+
+    for (let hh = 0; hh <= yMaxH; hh += 2) {
+      const f = (hh / yMaxH);
+      const y = bottom - f * (bottom - top);
+
+      ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+      ctx.stroke();
+
+      ctx.fillText(`${hh}h`, 12, y + 4);
+    }
+
+    const monthsShort = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const gap = 8;
+    const barW = Math.max(10, ((right - left) - gap*11) / 12);
+
+    for (let i = 0; i < 12; i++) {
+      const x = left + i*(barW + gap);
+      const barH = (mins[i] / yMaxMins) * (bottom - top);
+      const y = bottom - barH;
+
+      const isNow = (i === YEAR_DATA.currentMonthIdx);
+      ctx.fillStyle = isNow ? "rgba(255,200,90,0.80)" : "rgba(120,170,255,0.70)";
+      ctx.fillRect(x, y, barW, barH);
+
+      YEAR_BAR_HITBOXES.push({ idx: i, x, w: barW, top, bottom });
+
+      ctx.fillStyle = "rgba(255,255,255,0.82)";
+      ctx.font = "12px ui-sans-serif, system-ui";
+      const label = monthsShort[i];
+      const tw = ctx.measureText(label).width;
+      ctx.fillText(label, x + (barW - tw)/2, bottom + 18);
+    }
+
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.font = "16px ui-sans-serif, system-ui";
+    ctx.fillText(`Monthly Visibility (${YEAR_DATA.year})`, left, 20);
+
+    ctx.fillStyle = "rgba(255,200,90,0.92)";
+    ctx.font = "13px ui-sans-serif, system-ui";
+    ctx.fillText(`Max: ${maxH.toFixed(2)}h`, right - 110, 20);
+  }
+
+  // -----------------------------
+  // Aladin integration
+  // -----------------------------
+  function initAladinIfNeeded() {
+    if (aladin || aladinInitStarted) return;
+
+    if (!window.A || !A.init) {
+      updateCaption();
+      return;
+    }
+
+    aladinInitStarted = true;
+
+    A.init.then(() => {
+      aladin = A.aladin("#aladinDiv", {
+        survey: $("surveySelect").value,
+        fov: 1.5,
+        target: "0 0"
+      });
+      aladinReady = true;
+      updateAladinFromSelection(true);
+    }).catch(() => {
+      updateCaption();
+    });
+  }
+
+  function aladinSetFovDeg(fovDeg) {
+    if (!aladin) return;
+    if (typeof aladin.setFov === "function") aladin.setFov(fovDeg);
+    else if (typeof aladin.setFoV === "function") aladin.setFoV(fovDeg);
+  }
+
+  function aladinGoto(raDeg, decDeg) {
+    if (!aladin) return;
+    if (typeof aladin.gotoRaDec === "function") aladin.gotoRaDec(raDeg, decDeg);
+    else if (typeof aladin.gotoPosition === "function") aladin.gotoPosition(raDeg, decDeg);
+    else if (typeof aladin.setCenter === "function") aladin.setCenter(raDeg, decDeg);
+  }
+
+  function updateAladinFromSelection(_force) {
+    if (viewMode === "image") updateCaption();
+    if (!aladinReady || !aladin) return;
+
+    const obj = getSelectedObjectSafe();
+    if (!obj) return;
+
+    const raDeg = parseRaDeg(obj.ra);
+    const decDeg = parseDecDeg(obj.dec);
+    if (raDeg == null || decDeg == null) return;
+
+    const survey = $("surveySelect").value;
+    if (typeof aladin.setImageSurvey === "function") aladin.setImageSurvey(survey);
+
+    aladinGoto(raDeg, decDeg);
+    aladinSetFovDeg(computeRigFovDeg());
+  }
+
+  function updateObjectsStatus(){
+    const mode = SHOW_ALL_OBJECTS ? "all objects" : "filtered";
+    const q = (NAME_QUERY || "").trim();
+    const qTxt = q ? ` • search: "${q}"` : "";
+
+    $("objectsStatus").textContent =
+      `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} (${mode})${qTxt} • sorted by ${sortLabel()}`;
+  }
+
+  function updateShowAllBtnUI(){
+    const btn = $("showAllBtn");
+    if (!btn) return;
+    btn.textContent = SHOW_ALL_OBJECTS ? "Show filtered objects" : "Show all deep-sky objects";
+    btn.classList.toggle("active", SHOW_ALL_OBJECTS);
+  }
+
+  function wireShowAllBtn(){
+    const btn = $("showAllBtn");
+    if (!btn) return;
+
+    btn.addEventListener("click", () => {
+      SHOW_ALL_OBJECTS = !SHOW_ALL_OBJECTS;
+      updateShowAllBtnUI();
+
+      refreshTableOnly();
+      updateObjectsStatus();
+    });
+  }
+
+  // -----------------------------
+  // Wiring
+  // -----------------------------
+  function wireTableClick() {
+    const tbody = $("objectsTbody");
+    tbody.addEventListener("click", (e) => {
+      const tr = e.target.closest("tr[data-idx]");
+      if (!tr) return;
+      const idx = Number(tr.dataset.idx);
+      if (!Number.isFinite(idx)) return;
+
+      selectedObjectIdx = idx;
+
+      for (const row of tbody.querySelectorAll("tr")) row.classList.remove("selected");
+      tr.classList.add("selected");
+
+      if (viewMode === "night") drawNightChart();
+      if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+      if (viewMode === "image") updateAladinFromSelection(true);
+
+      updateCaption();
+      updateMobileChartInfo();
+    });
+  }
+
+  function wireNameSearch(){
+    const inp = $("nameSearch");
+    if (!inp) return;
+
+    const run = debounce(() => {
+      NAME_QUERY = inp.value || "";
+      refreshTableOnly();
+      updateObjectsStatus();
+    }, 80);
+
+    inp.addEventListener("input", run);
+
+    // Nice UX: ESC clears
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        inp.value = "";
+        NAME_QUERY = "";
+        refreshTableOnly();
+        updateObjectsStatus();
+        inp.blur();
+      }
+    });
+  }
+
+  function wireHeaderSort() {
+    const thead = document.querySelector("thead");
+    thead.addEventListener("click", (e) => {
+      const th = e.target.closest("th[data-key]");
+      if (!th) return;
+
+      const key = th.dataset.key;
+
+      if (sortState.key === key) {
+        sortState.dir = (sortState.dir === "asc") ? "desc" : "asc";
+      } else {
+        sortState.key = key;
+        sortState.dir = (key === "visibility") ? "desc" : "asc";
+        if (key === "magnitude") sortState.dir = "asc";
+      }
+
+      refreshTableOnly();
+      updateObjectsStatus();
+    });
+  }
+
+  function wireResizeRedraw(){
+    let t = null;
+    window.addEventListener("resize", () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        updateAllResponsiveUI();
+        if (viewMode === "night") drawNightChart();
+        else if (viewMode === "year") drawYearChart();
+        else updateAladinFromSelection(false);
+      }, 140);
+    });
+
+    setInterval(() => {
+      if (viewMode === "night") drawNightChart();
+    }, 30000);
+  }
+
+  function wireNightRadios(){
+    $("gridAltAz").addEventListener("change", () => { enforceMobileAltAz(); drawNightChart(); updateCaption(); });
+    $("gridEqu").addEventListener("change", () => { enforceMobileAltAz(); drawNightChart(); updateCaption(); });
+  }
+
+  function wireViewModeRadios(){
+    document.querySelectorAll('input[name="viewMode"]').forEach(r => {
+      r.addEventListener("change", () => setViewMode(r.value));
+    });
+  }
+
+  function wireSurveyDropdown(){
+    $("surveySelect").addEventListener("change", () => {
+      initAladinIfNeeded();
+      updateAladinFromSelection(true);
+      updateCaption();
+    });
+  }
+
+  function wireTypeFilter(){
+    $("typeFilter").addEventListener("change", () => {
+      // ✅ Auto-pick survey based on Type (still allows manual survey selection afterwards)
+      applyPreferredSurveyFromTypeFilter();
+
+      // If user is currently viewing Aladin, update it immediately
+      if (viewMode === "image") {
+        initAladinIfNeeded();
+        updateAladinFromSelection(true);
+      }
+
+      refreshTableOnly();
+      updateObjectsStatus();
+    });
+  }
+
+  function wireDateControls(){
+    $("datePrev").addEventListener("click", async () => {
+      const loc = getCurrentLocation();
+      if (!loc) return;
+      getBaseYmdForLocation(loc);
+      await setSelectedDateIso(isoAddDays(SELECTED_DATE_ISO, -1), { switchToNight: true });
+    });
+
+    $("dateNext").addEventListener("click", async () => {
+      const loc = getCurrentLocation();
+      if (!loc) return;
+      getBaseYmdForLocation(loc);
+      await setSelectedDateIso(isoAddDays(SELECTED_DATE_ISO, +1), { switchToNight: true });
+    });
+
+    $("dateDisplay").addEventListener("click", () => {
+      const picker = $("datePicker");
+      if (!picker) return;
+      updateDateUI();
+      if (typeof picker.showPicker === "function") picker.showPicker();
+      else picker.click();
+    });
+
+    $("datePicker").addEventListener("change", async () => {
+      const v = $("datePicker").value;
+      if (!v) return;
+      await setSelectedDateIso(v, { switchToNight: true });
+    });
+  }
+
+  function wireYearCanvasClick(){
+    const canvas = $("yearCanvas");
+    canvas.addEventListener("click", async (e) => {
+      if (viewMode !== "year") return;
+      if (!YEAR_DATA || !Array.isArray(YEAR_BAR_HITBOXES) || YEAR_BAR_HITBOXES.length !== 12) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      let hit = null;
+      for (const b of YEAR_BAR_HITBOXES) {
+        if (x >= b.x && x <= (b.x + b.w) && y >= b.top && y <= b.bottom) { hit = b; break; }
+      }
+      if (!hit) return;
+
+      const month = hit.idx + 1;
+      const iso = ymdToIso(YEAR_DATA.year, month, 15);
+      await setSelectedDateIso(iso, { switchToNight: true });
+    });
+  }
+
+  // -----------------------------
+  // Load JSONs
+  // -----------------------------
+  async function loadAllJson() {
+    try {
+      const data = await fetchJson("assets/locations.json");
+      if (!Array.isArray(data) || data.length === 0) throw new Error("Expected an array");
+      LOCATIONS = data; loadState.locations.ok = true;
+    } catch (e) { loadState.locations.ok = false; loadState.locations.err = String(e?.message || e); }
+
+    try {
+      const data = await fetchJson("assets/telescopes.json");
+      if (!data || !Array.isArray(data.telescopes) || !Array.isArray(data.reducers)) {
+        throw new Error("Expected { telescopes: [...], reducers: [...] }");
+      }
+      TELESCOPES = data.telescopes;
+      REDUCERS = data.reducers;
+
+      // ✅ Add a “Custom telescope …” entry at the end
+      ensureCustomTelescopeInList();
+
+      loadState.telescopes.ok = true;
+    } catch (e) {
+      loadState.telescopes.ok = false; loadState.telescopes.err = String(e?.message || e);
+    }
+
+    try {
+      const data = await fetchJson("assets/cameras.json");
+      if (!Array.isArray(data) || data.length === 0) throw new Error("Expected an array");
+      CAMERAS_ALL = data; loadState.cameras.ok = true;
+    } catch (e) { loadState.cameras.ok = false; loadState.cameras.err = String(e?.message || e); }
+
+    try {
+      const data = await fetchJson("assets/deepsky_objects.json");
+      if (!Array.isArray(data) || data.length === 0) throw new Error("Expected an array");
+      OBJECTS = data; loadState.objects.ok = true;
+    } catch (e) { loadState.objects.ok = false; loadState.objects.err = String(e?.message || e); }
+  }
+
+  async function populateAllSelects() {
+    populateSelectWithStatus(
+      $("locationSelect"),
+      loadState.locations.ok,
+      `✅ Loaded ${LOCATIONS.length} locations`,
+      `❌ Locations not loaded: ${loadState.locations.err || "unknown"}`,
+      LOCATIONS,
+      (l) => l.name
+    );
+
+    populateSelectWithStatus(
+      $("telescopeSelect"),
+      loadState.telescopes.ok,
+      `✅ Loaded ${TELESCOPES.length} telescopes`,
+      `❌ Telescopes not loaded: ${loadState.telescopes.err || "unknown"}`,
+      TELESCOPES,
+      (t) => t.name
+    );
+
+    rebuildSmartCameraSet();
+    rebuildCameraSelect();
+    rebuildReducerSelect();
+
+    $("mosaicLabel").textContent = `${$("mosaicRange").value}×`;
+    updateFovLabels();
+    updateHorizonStatus();
+    updateDateUI();
+
+    updateAllResponsiveUI();
+
+    if (loadState.objects.ok && loadState.locations.ok) {
+      buildTypeFilterOptions();
+      await recomputeVisibilityAndRender();
+      drawNightChart();
+      updateCaption();
+      updateMobileChartInfo();
+    } else {
+      $("objectsStatus").textContent = `❌ Objects not loaded: ${loadState.objects.err || "unknown"}`;
+      $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">No objects loaded.</td></tr>`;
+    }
+  }
+
+  function wireEvents() {
+    $("telescopeSelect").addEventListener("change", () => {
+      rebuildCameraSelect();
+      rebuildReducerSelect();
+
+      // ✅ show/hide custom inputs if needed
+      updateCustomTelescopeUI();
+
+      updateAllResponsiveUI();
+      updateFovLabels();
+      refreshTableOnly();
+
+      // If custom is selected, apply current input values
+      updateCustomTelescopeFromInputs();
+    });
+
+    $("reducerSelect").addEventListener("change", () => { updateFovLabels(); refreshTableOnly(); });
+    $("cameraSelect").addEventListener("change", () => { updateFovLabels(); refreshTableOnly(); });
+
+    $("locationSelect").addEventListener("change", async () => {
+      updateDateUI();
+      await recomputeVisibilityAndRender();
+      if (viewMode === "night") drawNightChart();
+      if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+      if (viewMode === "image") updateAladinFromSelection(true);
+      updateCaption();
+      updateMobileChartInfo();
+    });
+
+    $("horizonSelect").addEventListener("change", async () => {
+      const v = $("horizonSelect").value;
+
+      if (v === "__load__") {
+        rebuildHorizonSelectOptions();
+        $("horizonFileInput").click();
+        return;
+      }
+
+      if (v === "__clear__") {
+        HORIZON_PROFILE = null;
+        HORIZON_MODE = "numeric";
+        $("horizonFileInput").value = "";
+        updateHorizonStatus();
+
+        await recomputeVisibilityAndRender();
+        if (viewMode === "night") drawNightChart();
+        if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+        updateCaption();
+        updateMobileChartInfo();
+        return;
+      }
+
+      if (v === "__custom__") {
+        if (HORIZON_PROFILE) {
+          HORIZON_MODE = "custom";
+          updateHorizonStatus();
+          await recomputeVisibilityAndRender();
+          if (viewMode === "night") drawNightChart();
+          if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+          updateCaption();
+          updateMobileChartInfo();
+        } else {
+          HORIZON_MODE = "numeric";
+          updateHorizonStatus();
+        }
+        return;
+      }
+
+      const n = Number(v);
+      if (Number.isFinite(n)) {
+        LAST_NUMERIC_HORIZON_DEG = n;
+        HORIZON_MODE = "numeric";
+        updateHorizonStatus();
+
+        await recomputeVisibilityAndRender();
+        if (viewMode === "night") drawNightChart();
+        if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+        updateCaption();
+        updateMobileChartInfo();
+      }
+    });
+
+    $("minSizePercent").addEventListener("input", () => {
+      updateFovLabels();
+      refreshTableOnly();
+    });
+
+    $("mosaicRange").addEventListener("input", () => {
+      $("mosaicLabel").textContent = `${$("mosaicRange").value}×`;
+      updateFovLabels();
+      if (viewMode === "image") updateAladinFromSelection(true);
+      updateCaption();
+    });
+
+    $("horizonFileInput").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        HORIZON_PROFILE = parseHorizonFileText(text, file.name);
+        HORIZON_MODE = "custom";
+        updateHorizonStatus();
+
+        await recomputeVisibilityAndRender();
+        if (viewMode === "night") drawNightChart();
+        if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+        updateCaption();
+        updateMobileChartInfo();
+      } catch (err) {
+        HORIZON_PROFILE = null;
+        HORIZON_MODE = "numeric";
+        updateHorizonStatus();
+        alert(`Could not load horizon file:\n${err?.message || err}`);
+      }
+    });
+  }
+
+  // -----------------------------
+  // Init
+  // -----------------------------
+  (async function init() {
+    await loadAllJson();
+    await populateAllSelects();
+
+    wireEvents();
+    wireTypeFilter();
+    wireTableClick();
+    wireNameSearch();
+    wireHeaderSort();
+    wireShowAllBtn();
+    updateShowAllBtnUI();
+    wireResizeRedraw();
+    wireNightRadios();
+    wireViewModeRadios();
+    wireSurveyDropdown();
+    wireDateControls();
+    wireYearCanvasClick();
+    wireCustomTelescopeInputs();
+    updateCustomTelescopeUI();
+
+    $("viewNight").checked = true;
+    setViewMode("night");
+
+    updateAllResponsiveUI();
+    updateCaption();
+    drawNightChart();
+    updateMobileChartInfo();
+  })();
+
+})();
