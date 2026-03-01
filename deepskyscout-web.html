@@ -1,285 +1,292 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>DeepSkyScout – Rhodri Thomas</title>
-
-  <!-- Base site styles -->
-  <link rel="stylesheet" href="css/styles.css" />
-
-  <!-- DeepSkyScout page-specific extracted CSS -->
-  <link rel="stylesheet" href="css/deepskyscout.css" />
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>DeepSkyScout – Rhodri Thomas</title>
+<!-- Base site styles -->
+<link href="css/styles.css" rel="stylesheet"/>
+<!-- DeepSkyScout page-specific extracted CSS -->
+<link href="css/deepskyscout.css" rel="stylesheet"/>
 </head>
-
 <body>
-  <nav>
-    <a href="index.html">Home</a>
-    <a href="astro.html">Astro Photos</a>
-    <a href="deepskyscout-web.html" class="active">DeepSkyScout</a>
-  </nav>
-
-  <section class="hero">
-    <h1>DeepSkyScout</h1>
-    <p>Find the best deep-sky object for tonight.</p>
-  </section>
-
-  <div class="container planner-container">
-    <h2>Planner Setup</h2>
-
-    <div class="planner-layout">
-      <!-- CONTROLS -->
-      <div class="controls-panel">
-        <div class="card">
-          <div class="card-head">
-            <div class="status">Planner Setup</div>
-          </div>
-
-          <div style="padding:12px;">
-            <div class="form-grid" id="setupGrid">
-              <div class="form-row" id="locationRow">
-                <label for="locationSelect">Location</label>
-                <select id="locationSelect">
-                  <option disabled selected>⏳ Loading…</option>
-                </select>
-              </div>
-
-              <div class="form-row" id="horizonRow">
-                <label for="horizonSelect">
+<nav>
+<a href="index.html">Home</a>
+<a href="astro.html">Astro Photos</a>
+<a class="active" href="deepskyscout-web.html">DeepSkyScout</a>
+</nav>
+<section class="hero">
+<h1>DeepSkyScout</h1>
+<p>Find the best deep-sky object for tonight.</p>
+</section>
+<div class="container planner-container">
+<h2>Planner Setup</h2>
+<div class="planner-layout">
+<!-- CONTROLS -->
+<div class="controls-panel">
+<div class="card">
+<div class="card-head">
+<div class="status">Planner Setup</div>
+</div>
+<div style="padding:12px;">
+<div class="form-grid" id="setupGrid">
+<div class="form-row" id="locationRow">
+<label for="locationSelect">Location</label>
+<select id="locationSelect">
+<option disabled="" selected="">⏳ Loading…</option>
+</select>
+</div>
+<div class="form-row" id="horizonRow">
+<label for="horizonSelect">
                   Horizon altitude
                   <span class="muted" id="horizonFileStatus"> • No file loaded</span>
-                </label>
-                <select id="horizonSelect">
-                  <option value="0">0°</option>
-                  <option value="10">10°</option>
-                  <option value="20" selected>20°</option>
-                  <option value="30">30°</option>
-                  <option value="40">40°</option>
-                </select>
-              </div>
-
-              <input id="horizonFileInput" type="file" accept=".hrz,.csv,.txt,text/plain,text/csv" style="display:none;" />
-
-              <div class="form-row" id="minSizeRow">
-                <label for="minSizePercent">
+</label>
+<select id="horizonSelect">
+<option value="0">0°</option>
+<option value="10">10°</option>
+<option selected="" value="20">20°</option>
+<option value="30">30°</option>
+<option value="40">40°</option>
+</select>
+</div>
+<input accept=".hrz,.csv,.txt,text/plain,text/csv" id="horizonFileInput" style="display:none;" type="file"/>
+<div class="form-row" id="minSizeRow">
+<label for="minSizePercent">
                   Min object size (% of frame)
                   <span class="muted" id="minSizeInfo"> • —</span>
-                </label>
-
-                <div class="range-wrap">
-                  <input id="minSizePercent" type="range" min="0" max="25" step="0.5" value="3" />
-                  <span class="pill" id="minSizePill">3%</span>
-                </div>
-              </div>
-
-              <div class="form-row" id="mosaicRow">
-                <label for="mosaicRange">
+</label>
+<div class="range-wrap">
+<input id="minSizePercent" max="25" min="0" step="0.5" type="range" value="3"/>
+<span class="pill" id="minSizePill">3%</span>
+</div>
+</div>
+<div class="form-row" id="mosaicRow">
+<label for="mosaicRange">
                   Mosaic (viewer)
                   <span class="muted" id="mosaicFovLabel"> • FoV: —</span>
-                </label>
-                <div class="range-wrap">
-                  <input id="mosaicRange" type="range" min="1" max="5" step="1" value="1" />
-                  <span class="pill" id="mosaicLabel">1×</span>
-                </div>
-              </div>
-
-              <div class="form-row" id="telescopeRow">
-                <label for="telescopeSelect">Telescope</label>
-                <select id="telescopeSelect">
-                  <option disabled selected>⏳ Loading…</option>
-                </select>
-
-                <!-- ✅ Custom telescope fields (shown only when Custom telescope is selected) -->
-                <div id="customTelescopeFields" style="display:none; margin-top:10px;">
-                  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                    <div>
-                      <label for="customScopeDiameter">Diameter (mm)</label>
-                      <input id="customScopeDiameter" type="number" min="1" step="1" value="80" />
-                    </div>
-                    <div>
-                      <label for="customScopeFocal">Focal length (mm)</label>
-                      <input id="customScopeFocal" type="number" min="1" step="1" value="400" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="form-row" id="reducerRow">
-                <label for="reducerSelect">Reducer / Barlow</label>
-                <select id="reducerSelect">
-                  <option disabled selected>⏳ Loading…</option>
-                </select>
-              </div>
-
-              <div class="form-row" id="cameraRow">
-                <label for="cameraSelect">Camera</label>
-                <select id="cameraSelect">
-                  <option disabled selected>⏳ Loading…</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- CHART -->
-      <div class="chart-panel">
-        <div class="card">
-          <div class="card-head">
-            <div class="status" id="chartTitle">
-              <span id="chartTitleText">Tonight’s Visibility</span>
-              <span class="date-nav night-only" id="dateNav" title="Change the date for Tonight’s Visibility">
-                <button class="date-btn" id="datePrev" type="button" aria-label="Previous day">‹</button>
-                <button class="date-pill" id="dateDisplay" type="button" title="Pick a date">—</button>
-                <button class="date-btn" id="dateNext" type="button" aria-label="Next day">›</button>
-                <input id="datePicker" type="date" style="display:none;" />
-              </span>
-            </div>
-
-            <div class="chart-toggles">
-              <div class="chart-left">
-                <label class="toggle" title="Show tonight’s sky track and visibility">
-                  <input id="viewNight" type="radio" name="viewMode" value="night" checked />
+</label>
+<div class="range-wrap">
+<input id="mosaicRange" max="5" min="1" step="1" type="range" value="1"/>
+<span class="pill" id="mosaicLabel">1×</span>
+</div>
+</div>
+<div class="form-row" id="telescopeRow">
+<label for="telescopeSelect">Telescope</label>
+<select id="telescopeSelect">
+<option disabled="" selected="">⏳ Loading…</option>
+</select>
+<!-- ✅ Custom telescope fields (shown only when Custom telescope is selected) -->
+<div id="customTelescopeFields" style="display:none; margin-top:10px;">
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+<div>
+<label for="customScopeDiameter">Diameter (mm)</label>
+<input id="customScopeDiameter" min="1" step="1" type="number" value="80"/>
+</div>
+<div>
+<label for="customScopeFocal">Focal length (mm)</label>
+<input id="customScopeFocal" min="1" step="1" type="number" value="400"/>
+</div>
+</div>
+</div>
+</div>
+<div class="form-row" id="reducerRow">
+<label for="reducerSelect">Reducer / Barlow</label>
+<select id="reducerSelect">
+<option disabled="" selected="">⏳ Loading…</option>
+</select>
+</div>
+<div class="form-row" id="cameraRow">
+<label for="cameraSelect">Camera</label>
+<select id="cameraSelect">
+<option disabled="" selected="">⏳ Loading…</option>
+</select>
+</div>
+<div class="form-row" id="advancedRow">
+<label class="toggle" for="advancedToggle">
+<input id="advancedToggle" type="checkbox"/>
+    Advanced mode
+  </label>
+<div class="muted" style="margin-top:6px;">Show Bortle + SNR estimate options.</div>
+</div>
+<div id="advancedControlsWrap" style="display:none;">
+<div class="form-row" id="bortleRow">
+<label for="bortleSelect">Bortle scale <span class="muted" id="bortleSQMLabel"> • SQM: —</span></label>
+<select id="bortleSelect">
+<option value="1">1 (dark)</option>
+<option value="2">2</option>
+<option value="3">3</option>
+<option selected="" value="4">4</option>
+<option value="5">5</option>
+<option value="6">6</option>
+<option value="7">7</option>
+<option value="8">8</option>
+<option value="9">9 (inner city)</option>
+</select>
+</div>
+<div class="form-row" id="snrBroadbandRow">
+<label for="snrBroadbandSelect">RGB filter (galaxies / clusters)</label>
+<select id="snrBroadbandSelect">
+<option value="B">Blue (B)</option>
+<option selected="" value="V">Green (V)</option>
+<option value="R">Red (R)</option>
+</select>
+</div>
+<div class="form-row" id="snrNebulaRow">
+<label for="snrNebulaBandpassSelect">Nebula filter (Hα)</label>
+<select id="snrNebulaBandpassSelect">
+<option selected="" value="20">20 nm (Smart Scopes)</option>
+<option value="9">9 nm</option>
+<option value="6">6 nm</option>
+<option value="3">3 nm</option>
+</select>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- CHART -->
+<div class="chart-panel">
+<div class="card">
+<div class="card-head">
+<div class="status" id="chartTitle">
+<span id="chartTitleText">Tonight’s Visibility</span>
+<span class="date-nav night-only" id="dateNav" title="Change the date for Tonight’s Visibility">
+<button aria-label="Previous day" class="date-btn" id="datePrev" type="button">‹</button>
+<button class="date-pill" id="dateDisplay" title="Pick a date" type="button">—</button>
+<button aria-label="Next day" class="date-btn" id="dateNext" type="button">›</button>
+<input id="datePicker" style="display:none;" type="date"/>
+</span>
+</div>
+<div class="chart-toggles">
+<div class="chart-left">
+<label class="toggle" title="Show tonight’s sky track and visibility">
+<input checked="" id="viewNight" name="viewMode" type="radio" value="night"/>
                   Tonight’s Visibility
                 </label>
-                <label class="toggle" title="Show Aladin sky image viewer">
-                  <input id="viewImage" type="radio" name="viewMode" value="image" />
+<label class="toggle" title="Show Aladin sky image viewer">
+<input id="viewImage" name="viewMode" type="radio" value="image"/>
                   Sky Image (Aladin)
                 </label>
-                <label class="toggle" title="Show visibility across the year (by month)">
-                  <input id="viewYear" type="radio" name="viewMode" value="year" />
+<label class="toggle" title="Show visibility across the year (by month)">
+<input id="viewYear" name="viewMode" type="radio" value="year"/>
                   Monthly Visibility
                 </label>
-              </div>
-
-              <span class="sep night-only" id="sepNight"></span>
-
-              <div class="chart-middle">
-                <label class="toggle night-only" title="Show altitude/azimuth grid">
-                  <input id="gridAltAz" type="radio" name="gridMode" value="altaz" checked />
+</div>
+<span class="sep night-only" id="sepNight"></span>
+<div class="chart-middle">
+<label class="toggle night-only" title="Show altitude/azimuth grid">
+<input checked="" id="gridAltAz" name="gridMode" type="radio" value="altaz"/>
                   Alt-Az
                 </label>
-                <label class="toggle night-only" title="Show RA/Dec grid (projected)">
-                  <input id="gridEqu" type="radio" name="gridMode" value="equ" />
+<label class="toggle night-only" title="Show RA/Dec grid (projected)">
+<input id="gridEqu" name="gridMode" type="radio" value="equ"/>
                   Equatorial
                 </label>
-              </div>
-
-              <div class="chart-right" id="surveyWrap" style="display:none;">
-                <label for="surveySelect">Survey</label>
-                <select id="surveySelect">
-                  <option value="P/DSS2/color" selected>DSS2 color</option>
-                  <option value="https://www.simg.de/nebulae3/dr0_2/rgb8/">NSNS RGB Continuum</option>
-                  <option value="https://www.simg.de/nebulae3/dr0_2/ohs8/">NSNS OIII Halpha and SII</option>
-                  <option value="https://www.simg.de/nebulae3/dr0_2/hbr8/">NSNS H-alpha and continuum</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div class="chart-body">
-            <!-- ✅ Mobile-only info (in chart area, above canvas) -->
-            <div class="mobile-chart-info" id="mobileChartInfo" style="display:none;"></div>
-
-            <div id="nightPane">
-              <canvas id="skyCanvas"></canvas>
-            </div>
-
-            <div id="imagePane" style="display:none;">
-              <div id="aladinDiv"></div>
-            </div>
-
-            <div id="yearPane" style="display:none;">
-              <canvas id="yearCanvas"></canvas>
-            </div>
-          </div>
-
-          <div class="chart-foot" id="chartCaption">
+</div>
+<div class="chart-right" id="surveyWrap" style="display:none;">
+<label for="surveySelect">Survey</label>
+<select id="surveySelect">
+<option selected="" value="P/DSS2/color">DSS2 color</option>
+<option value="https://www.simg.de/nebulae3/dr0_2/rgb8/">NSNS RGB Continuum</option>
+<option value="https://www.simg.de/nebulae3/dr0_2/ohs8/">NSNS OIII Halpha and SII</option>
+<option value="https://www.simg.de/nebulae3/dr0_2/hbr8/">NSNS H-alpha and continuum</option>
+</select>
+</div>
+</div>
+</div>
+<div class="chart-body">
+<!-- ✅ Mobile-only info (in chart area, above canvas) -->
+<div class="mobile-chart-info" id="mobileChartInfo" style="display:none;"></div>
+<div id="nightPane">
+<canvas id="skyCanvas"></canvas>
+</div>
+<div id="imagePane" style="display:none;">
+<div id="aladinDiv"></div>
+</div>
+<div id="yearPane" style="display:none;">
+<canvas id="yearCanvas"></canvas>
+</div>
+</div>
+<div class="chart-foot" id="chartCaption">
             Select an object to view: Tonight’s Visibility, Sky Image (Aladin), or Monthly Visibility.
           </div>
-        </div>
-      </div>
+</div>
+</div>
+<!-- TABLE -->
+<div class="table-panel">
+<div class="card">
+<div class="card-head" id="objectsCardHead">
+<div class="status">Objects</div>
+<div class="table-controls" id="typeFilterWrap">
+<label class="muted" for="typeFilter">Type</label>
+<select id="typeFilter">
+<option selected="" value="__all__">All</option>
+</select>
+</div>
+<div class="table-search" id="nameSearchWrap">
+<label class="muted" for="nameSearch">Search</label>
+<input id="nameSearch" placeholder="Name or common name…" type="text"/>
+</div>
+<div class="muted" id="tableHint">Tap a row • Tap headers to sort</div>
+</div>
+<div class="table-scroll">
+<table>
+<thead>
+<tr>
+<th data-key="name" style="min-width:140px;">Name <span class="arrow" id="arrow-name"></span></th>
+<!-- ✅ Mobile-only visibility (2nd column on mobile) -->
+<th class="mobile-only" data-key="visibility" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility-m"></span></th>
 
-      <!-- TABLE -->
-      <div class="table-panel">
-        <div class="card">
-          <div class="card-head" id="objectsCardHead">
-            <div class="status">Objects</div>
+<th class="advanced-only mobile-only" data-key="snr" style="min-width:90px;">SNR <span class="arrow" id="arrow-snr-m"></span></th>
+<th class="desktop-only" data-key="common_name" style="min-width:160px;">Common Name <span class="arrow" id="arrow-common_name"></span></th>
+<th class="advanced-only desktop-only" data-key="magnitude" style="min-width:90px;">Mag <span class="arrow" id="arrow-magnitude"></span></th>
+<th class="advanced-only desktop-only" data-key="size" style="min-width:120px;">Size <span class="arrow" id="arrow-size"></span></th>
+<th data-key="type" style="min-width:120px;">Type <span class="arrow" id="arrow-type"></span></th>
+<th class="desktop-only" data-key="subtype" style="min-width:160px;">Subtype <span class="arrow" id="arrow-subtype"></span></th>
+<!-- ✅ Desktop-only visibility (last column on desktop) -->
+<th class="advanced-only desktop-only" data-key="snr" style="min-width:90px;">SNR <span class="arrow" id="arrow-snr"></span></th>
 
-            <div class="table-controls" id="typeFilterWrap">
-              <label for="typeFilter" class="muted">Type</label>
-              <select id="typeFilter">
-                <option value="__all__" selected>All</option>
-              </select>
-            </div>
-
-            <div class="table-search" id="nameSearchWrap">
-              <label for="nameSearch" class="muted">Search</label>
-              <input id="nameSearch" type="text" placeholder="Name or common name…" />
-            </div>
-
-            <div class="muted" id="tableHint">Tap a row • Tap headers to sort</div>
-          </div>
-
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th data-key="name" style="min-width:140px;">Name <span class="arrow" id="arrow-name"></span></th>
-
-                  <!-- ✅ Mobile-only visibility (2nd column on mobile) -->
-                  <th data-key="visibility" class="mobile-only" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility-m"></span></th>
-
-                  <th data-key="common_name" class="desktop-only" style="min-width:160px;">Common Name <span class="arrow" id="arrow-common_name"></span></th>
-                  <th data-key="magnitude" style="min-width:90px;">Mag <span class="arrow" id="arrow-magnitude"></span></th>
-                  <th data-key="size" style="min-width:120px;">Size <span class="arrow" id="arrow-size"></span></th>
-                  <th data-key="type" style="min-width:120px;">Type <span class="arrow" id="arrow-type"></span></th>
-                  <th data-key="subtype" class="desktop-only" style="min-width:160px;">Subtype <span class="arrow" id="arrow-subtype"></span></th>
-
-                  <!-- ✅ Desktop-only visibility (last column on desktop) -->
-                  <th data-key="visibility" class="desktop-only" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility"></span></th>
-                </tr>
-              </thead>
-              <tbody id="objectsTbody">
-                <tr><td colspan="8" class="muted" style="padding:12px;">Loading…</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <div class="table-actions" id="objectsActions">
-            <button id="showAllBtn" type="button" class="action-btn">
+<th class="desktop-only" data-key="visibility" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility"></span></th>
+</tr>
+</thead>
+<tbody id="objectsTbody">
+<tr><td class="muted" colspan="10" style="padding:12px;">Loading…</td></tr>
+</tbody>
+</table>
+</div>
+<div class="table-actions" id="objectsActions">
+<button class="action-btn" id="showAllBtn" type="button">
               Show all deep-sky objects
             </button>
+<div class="status" id="objectsStatus">⏳ Loading objects…</div>
 
-            <div class="status" id="objectsStatus">⏳ Loading objects…</div>
-          </div>
-          <div class="table-foot" id="objectsFoot"></div>
-        </div>
-      </div>
-
-      <!-- REFERENCES -->
-      <div class="refs-panel">
-        <div class="refs">
-          <strong>References & credits</strong>
-          <ul>
-            <li>NSNS surveys (HiPS) — paper: <a href="https://iopscience.iop.org/article/10.3847/2515-5172/adfec7" target="_blank" rel="noopener">10.3847/2515-5172/adfec7</a></li>
-            <li>Aladin Lite (sky viewer): <a href="https://aladin.cds.unistra.fr/AladinLite/" target="_blank" rel="noopener">aladin.cds.unistra.fr</a></li>
-            <li>DSS2 (Digitized Sky Survey, served via Aladin/HiPS): <a href="https://archive.stsci.edu/dss/" target="_blank" rel="noopener">STScI DSS</a></li>
-            <li>Sunrise/sunset algorithm — NOAA Solar Calculator method (implemented locally in JS): <a href="https://gml.noaa.gov/grad/solcalc/" target="_blank" rel="noopener">NOAA SolCalc</a></li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <footer>
+            <div class="muted" id="advancedColumnsHint" style="display:none;">Advanced: SNR is an approximate ranking estimate.</div>
+</div>
+<div class="table-foot" id="objectsFoot"></div>
+</div>
+</div>
+<!-- REFERENCES -->
+<div class="refs-panel">
+<div class="refs">
+<strong>References &amp; credits</strong>
+<ul>
+<li>NSNS surveys (HiPS) — paper: <a href="https://iopscience.iop.org/article/10.3847/2515-5172/adfec7" rel="noopener" target="_blank">10.3847/2515-5172/adfec7</a></li>
+<li>Aladin Lite (sky viewer): <a href="https://aladin.cds.unistra.fr/AladinLite/" rel="noopener" target="_blank">aladin.cds.unistra.fr</a></li>
+<li>DSS2 (Digitized Sky Survey, served via Aladin/HiPS): <a href="https://archive.stsci.edu/dss/" rel="noopener" target="_blank">STScI DSS</a></li>
+<li>Sunrise/sunset algorithm — NOAA Solar Calculator method (implemented locally in JS): <a href="https://gml.noaa.gov/grad/solcalc/" rel="noopener" target="_blank">NOAA SolCalc</a></li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+<footer>
     © 2026 Rhodri Thomas – Clear Skies
   </footer>
-
-  <!-- Aladin Lite v3 -->
-  <script src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js" charset="utf-8"></script>
-
-  <!-- DeepSkyScout extracted JS (your big inline <script> moved here) -->
-  <script src="js/deepskyscout.js" defer></script>
+<!-- Aladin Lite v3 -->
+<script charset="utf-8" src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"></script>
+<!-- DeepSkyScout extracted JS (your big inline <script> moved here) -->
+<script defer="" src="js/deepskyscout.js"></script>
 </body>
 </html>
