@@ -507,14 +507,29 @@ function findOptionValueByText(sel, rawText){
   return null;
 }
 
-function safeHorizonAssetPath(raw){
-  if (raw == null) return null;
+function getSafeHorizonAssetCandidates(raw){
+  if (raw == null) return [];
   const s = String(raw).trim();
-  if (!s) return null;
+  if (!s) return [];
   const low = s.toLowerCase();
-  if (["1","true","yes","default","horizon.hrz"].includes(low)) return "assets/horizon.hrz";
-  if (/^assets\/[a-z0-9._\/-]+$/i.test(s) && /\.(hrz|csv|txt)$/i.test(s)) return s;
-  return null;
+
+  // Common share-link values: try the repo's assets path first, then site root.
+  if (["1","true","yes","default","horizon.hrz"].includes(low)) {
+    return ["assets/horizon.hrz", "horizon.hrz"];
+  }
+
+  // Allow only safe relative site paths.
+  if (/^[a-z0-9._\/-]+$/i.test(s) && /\.(hrz|csv|txt)$/i.test(s) && !s.startsWith("/") && !s.includes("..")) {
+    const out = [s];
+    // If the shared path points at the common default file, try both layouts.
+    if (/^(?:assets\/)?horizon\.hrz$/i.test(s)) {
+      if (!out.includes("assets/horizon.hrz")) out.unshift("assets/horizon.hrz");
+      if (!out.includes("horizon.hrz")) out.push("horizon.hrz");
+    }
+    return out;
+  }
+
+  return [];
 }
 
 function basenameFromPath(path){
@@ -530,6 +545,21 @@ async function loadHorizonProfileFromAsset(relPath){
   HORIZON_MODE = "custom";
   updateHorizonStatus();
   return profile;
+}
+
+async function loadFirstAvailableHorizonProfile(paths){
+  const tried = [];
+  for (const relPath of (paths || [])) {
+    if (!relPath || tried.includes(relPath)) continue;
+    tried.push(relPath);
+    try {
+      return await loadHorizonProfileFromAsset(relPath);
+    } catch (err) {
+      console.warn(`Could not load horizon asset ${relPath}:`, err);
+    }
+  }
+  if (tried.length) throw new Error(`Could not load any horizon asset: ${tried.join(', ')}`);
+  return null;
 }
 
 function getCurrentPlannerCameraName(){
@@ -639,9 +669,9 @@ async function applyUrlStateFromQuery(){
   if (["B","V","R"].includes(rgbRaw) && $("snrBroadbandSelect")) $("snrBroadbandSelect").value = rgbRaw;
   const haRaw = String(getQueryParamValue(["ha", "halpha", "bandpass"]) || "");
   if (["20","9","6","3"].includes(haRaw) && $("snrNebulaBandpassSelect")) $("snrNebulaBandpassSelect").value = haRaw;
-  const horizonPath = safeHorizonAssetPath(getQueryParamValue(["horizon"]));
-  if (horizonPath) {
-    try { await loadHorizonProfileFromAsset(horizonPath); } catch (err) { console.warn("Could not auto-load horizon from URL:", err); }
+  const horizonCandidates = getSafeHorizonAssetCandidates(getQueryParamValue(["horizon"]));
+  if (horizonCandidates.length) {
+    try { await loadFirstAvailableHorizonProfile(horizonCandidates); } catch (err) { console.warn("Could not auto-load horizon from URL:", err); }
   }
   updateFovLabels();
   updateDateUI();
