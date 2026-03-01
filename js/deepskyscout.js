@@ -3331,8 +3331,8 @@ box.innerHTML = `
     ensureSNRSelectOptions();
     updateAdvancedUI();
     wireAdvancedModeControls();
-    wirePlannerLinkUI();
     await applyUrlStateFromQuery();
+    wirePlannerLinkUI();
 
     $("viewNight").checked = true;
     setViewMode("night");
