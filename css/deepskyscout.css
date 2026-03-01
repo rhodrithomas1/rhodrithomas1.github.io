@@ -192,6 +192,12 @@
 
 .toggle input{ transform: translateY(1px); }
 
+/* IMPORTANT: allow toggle labels inside .form-row (overrides .form-row label {display:block}) */
+.form-row label.toggle{
+  display:inline-flex;
+  margin-bottom: 0;
+}
+
 .sep{
   width:1px;height:24px;
   background:rgba(255,255,255,.12);
@@ -244,6 +250,13 @@
   background:rgba(255,255,255,.06);
   font-size:.95rem;
   white-space:nowrap;
+}
+
+/* Advanced block */
+#advancedControlsWrap{
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,.10);
 }
 
 /* Table controls */
@@ -626,4 +639,30 @@ td.vis-cell{
   .chart-body{ padding: 8px; }
   .table-scroll{ max-height: 62vh; }
   #aladinDiv{ height: 62vh; min-height: 260px; }
+}
+
+
+/* -----------------------------
+   Advanced-mode table columns
+   ----------------------------- */
+.advanced-only{
+  display: none !important;
+}
+
+/* Desktop: show advanced-only columns when Advanced mode is ON */
+body.advanced-on .advanced-only.desktop-only{
+  display: table-cell !important;
+}
+
+/* Mobile: show advanced-only columns when Advanced mode is ON */
+@media (max-width: 600px){
+  body.advanced-on .advanced-only.mobile-only{
+    display: table-cell !important;
+  }
+}
+
+td.snr-cell{
+  background: rgba(255,255,255,.03);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
