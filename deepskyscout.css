@@ -1,0 +1,629 @@
+/* css/deepskyscout.css */
+
+:root{
+  --viewerH: 60vh; /* exactly 60% of viewport height */
+}
+
+.container.planner-container{
+  max-width: none;
+  margin: 0 24px 60px 24px;
+}
+
+/* --- Layout: desktop = setup full-width, then table + chart side-by-side, refs full-width --- */
+.planner-layout{
+  display:grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "controls controls"
+    "table    chart"
+    "refs     refs";
+  gap: 24px;
+  align-items: start;
+  margin-top: 14px;
+}
+
+@media (min-width: 1200px){
+  .planner-layout{
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  }
+}
+
+.controls-panel{ grid-area: controls; min-width:0; }
+.chart-panel{ grid-area: chart; min-width:0; }
+.table-panel{ grid-area: table; min-width:0; }
+.refs-panel{ grid-area: refs; min-width:0; }
+
+@media (max-width: 1100px){
+  /* ✅ Portrait mobile/tablet: Planner setup, then chart, then table */
+  .planner-layout{
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "controls"
+      "chart"
+      "table"
+      "refs";
+    gap: 14px;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape){
+  /* ✅ Phone landscape: chart + table side-by-side */
+  .planner-layout{
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "controls controls"
+      "chart    table"
+      "refs     refs";
+    gap: 12px;
+  }
+}
+
+/* Table scroll / width safety */
+.table-scroll{ overflow-x: auto; }
+.table-scroll table{
+  width: max-content;
+  min-width: 100%;
+}
+
+/* Prevent flex children from forcing width */
+.table-panel > .card,
+.table-panel .card-head,
+.table-panel .table-scroll,
+.table-panel .table-actions{
+  min-width: 0;
+}
+
+/* If the status line ever gets long, allow wrapping */
+.table-actions .status{
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.card{
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.04);
+  overflow:hidden;
+}
+
+.card-head{
+  padding:10px 12px;
+  border-bottom:1px solid rgba(255,255,255,.10);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.card-head .status{ opacity:.9; font-size:.95rem; }
+.muted{ opacity:.8; }
+
+/* --- Chart header: ALWAYS one line (radios + grid + survey) --- */
+.chart-toggles{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:100%;
+  flex-wrap: nowrap;     /* ✅ force one line */
+  min-width: 0;
+  overflow-x: auto;      /* ✅ safety: if viewport too small, it scrolls instead of wrapping */
+}
+
+.chart-left{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex: 1 1 auto;        /* takes remaining space */
+  min-width: 0;          /* ✅ allow shrinking */
+  flex-wrap: nowrap;     /* ✅ keep the 3 radios on one line */
+}
+
+.chart-middle{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex: 0 0 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+#surveyWrap{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex: 0 0 auto;         /* ✅ DO NOT grow */
+  min-width: 0;
+  white-space: nowrap;
+  margin-left: auto;      /* push it to the far right */
+}
+
+#surveyWrap label{
+  opacity:.9;
+  font-size:.92rem;
+  white-space: nowrap;
+}
+
+#surveyWrap select{
+  width: 220px;           /* ✅ fixed/compact so it doesn't mess up radios */
+  max-width: 220px;
+  min-width: 160px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(0,0,0,.25);
+  color:inherit;
+  outline:none;
+}
+
+/* If the chart column is narrow, put Survey on its own line (keeps radios together) */
+@media (max-width: 1350px){
+  #surveyWrap{
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* Legacy hook (kept, but now surveyWrap is the real driver) */
+.chart-right{
+  min-width: 0 !important;  /* allow shrinking */
+  flex: 1 1 320px;          /* can wrap under left if needed */
+  justify-content: flex-end;
+}
+
+.chart-right select{
+  max-width: 100% !important; /* don't cap at 300px */
+}
+
+.toggle{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.05);
+  user-select:none;
+  cursor:pointer;
+  white-space:nowrap;
+  font-size:.92rem;
+  opacity:.95;
+}
+
+.toggle input{ transform: translateY(1px); }
+
+.sep{
+  width:1px;height:24px;
+  background:rgba(255,255,255,.12);
+  margin:0 2px;
+}
+
+.night-only{ display:inline-flex; }
+
+/* Controls grid */
+.form-grid{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:12px;
+  margin-top:12px;
+}
+
+@media (min-width:800px){
+  .form-grid{ grid-template-columns:1fr 1fr; }
+}
+
+.form-row label{ display:block; margin-bottom:6px; opacity:.9; }
+
+.form-row select,
+.form-row input[type="number"],
+.form-row input[type="range"],
+.form-row input[type="file"]{
+  width:100%;
+  padding:10px 12px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(0,0,0,.25);
+  color:inherit;
+  outline:none;
+}
+
+.form-row select:disabled,
+.form-row input:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+
+.range-wrap{ display:flex; gap:10px; align-items:center; }
+.range-wrap input[type="range"]{ padding:0; height:34px; }
+
+.pill{
+  display:inline-block;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(255,255,255,.06);
+  font-size:.95rem;
+  white-space:nowrap;
+}
+
+/* Table controls */
+.table-controls{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex: 0 0 auto;
+}
+
+.table-controls label{
+  font-size:.92rem;
+  white-space:nowrap;
+}
+
+.table-controls select{
+  padding:6px 10px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(0,0,0,.25);
+  color:inherit;
+  outline:none;
+  max-width: 260px;
+}
+
+/* Search box in the Objects header */
+.table-search{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.table-search label{
+  font-size:.92rem;
+  white-space:nowrap;
+}
+
+.table-search input{
+  width:100%;
+  max-width: 260px;
+  padding:6px 10px;
+  border-radius:10px;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(0,0,0,.25);
+  color:inherit;
+  outline:none;
+}
+
+.table-search input::placeholder{ opacity:.6; }
+
+/* Keep the hint visible and pushed to the right on desktop */
+#tableHint{
+  margin-left:auto;
+  white-space:nowrap;
+}
+
+/* Table */
+table{ width:100%; border-collapse:collapse; font-size:.95rem; }
+
+thead th{
+  text-align:left;
+  padding:10px 12px;
+  border-bottom:1px solid rgba(255,255,255,.10);
+  opacity:.9;
+  font-weight:600;
+  position:sticky;
+  top:0;
+  background:rgba(10,10,20,.92);
+  backdrop-filter: blur(6px);
+  user-select:none;
+  cursor:pointer;
+  white-space:nowrap;
+}
+
+thead th .arrow{ opacity:.75; margin-left:6px; font-size:.9em; }
+tbody td{ padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.06); vertical-align:top; }
+tbody tr{ cursor:pointer; }
+tbody tr:hover{ background:rgba(255,255,255,.06); }
+
+tbody tr.selected{
+  background:rgba(120,180,255,.14);
+  outline:1px solid rgba(120,180,255,.35);
+  outline-offset:-1px;
+}
+
+td.vis-cell{
+  background:rgba(120,180,255,.10);
+  border-left:1px solid rgba(120,180,255,.18);
+  font-weight:600;
+}
+
+.mono{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.desktop-only{ display: table-cell; }
+.mobile-only{ display: none; }
+
+/* Chart body + canvases */
+.chart-body{ padding: 12px; }
+
+#skyCanvas, #yearCanvas{
+  width: 100%;
+  height: auto;
+  display:block;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.18);
+}
+
+#yearCanvas{ cursor:pointer; }
+
+#aladinDiv{
+  width:100%;
+  height: 620px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  overflow:hidden;
+  background: rgba(0,0,0,.18);
+}
+
+.chart-foot{
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255,255,255,.10);
+  font-size: .95rem;
+  opacity: .92;
+  line-height: 1.45;
+}
+
+.chart-foot code{
+  background:rgba(0,0,0,.25);
+  padding:2px 6px;
+  border-radius:6px;
+}
+
+/* References */
+.refs{
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.04);
+  font-size: .92rem;
+  line-height: 1.5;
+  opacity: .95;
+}
+
+.refs ul{ margin: 8px 0 0 18px; padding: 0; }
+.refs li{ margin: 6px 0; }
+.refs a{ color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+
+/* --- Date controls next to Tonight title --- */
+#chartTitle{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+#chartTitleText{ font-weight:600; }
+
+.date-nav{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin-left:4px;
+}
+
+.date-btn, .date-pill{
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.15);
+  background:rgba(0,0,0,.22);
+  color:inherit;
+  cursor:pointer;
+  user-select:none;
+  line-height:1;
+}
+
+.date-btn{
+  padding:6px 10px;
+  font-size: 1rem;
+  opacity:.95;
+}
+
+.date-pill{
+  padding:6px 10px;
+  font-size:.92rem;
+  white-space:nowrap;
+  opacity:.95;
+}
+
+.date-btn:hover, .date-pill:hover{
+  background:rgba(255,255,255,.07);
+}
+
+/* Table scroll area base cap (desktop gets overridden below) */
+.table-scroll{
+  max-height: 520px;
+  overflow:auto;
+}
+
+/* Row under table: button + status */
+.table-actions{
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255,255,255,.10);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.action-btn{
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.15);
+  background: rgba(0,0,0,.22);
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 12px;
+  font-size: .92rem;
+  white-space: nowrap;
+}
+
+.action-btn:hover{ background: rgba(255,255,255,.07); }
+
+.action-btn.active{
+  background: rgba(120,180,255,.14);
+  border-color: rgba(120,180,255,.35);
+}
+
+@media (min-width: 1101px){
+  /* Fixed viewer height (same for night/aladin/year) */
+  .chart-panel .chart-body{
+    height: var(--viewerH);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* Make the active pane fill the viewer */
+  #nightPane, #imagePane, #yearPane{
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Canvases fill the pane height */
+  #skyCanvas, #yearCanvas{
+    height: 100% !important;
+  }
+
+  /* Aladin fills the pane height */
+  #aladinDiv{
+    height: 100% !important;
+  }
+
+  /* TABLE: match viewer height */
+  .table-panel > .card{
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* Scroll area matches the figure area (60vh minus chart-body padding: 12px top + 12px bottom) */
+  .table-scroll{
+    height: calc(var(--viewerH) - 24px);
+    max-height: calc(var(--viewerH) - 24px);
+    overflow: auto;
+    min-height: 0;
+  }
+}
+
+/* Mobile chart info (shown on mobile, night mode) */
+.mobile-chart-info{
+  display:none;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.18);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  line-height: 1.35;
+}
+
+.mobile-chart-info .t1{ font-weight: 700; }
+.mobile-chart-info .t2{ margin-top: 4px; opacity: .95; }
+
+.mobile-chart-info code{
+  background:rgba(0,0,0,.25);
+  padding:2px 6px;
+  border-radius:6px;
+}
+
+/* Table footer (mobile only) */
+.table-foot{
+  display:none;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255,255,255,.10);
+  gap: 10px;
+  flex-direction: column;
+}
+
+/* ✅ Phone portrait adjustments */
+@media (max-width: 600px){
+  .container.planner-container{
+    margin: 0 12px 44px 12px;
+  }
+
+  section.hero{
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  /* Keep the three mode toggles horizontal */
+  .chart-toggles{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .chart-left{
+    min-width: 0 !important;
+    width: 100%;
+    display:grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+
+  .chart-left .toggle{
+    width: 100%;
+    justify-content:center;
+    padding: 6px 6px;
+    font-size: .85rem;
+  }
+
+  /* Remove grid mode buttons (always Alt-Az) */
+  .chart-middle{ display:none !important; }
+  #sepNight{ display:none !important; }
+
+  /* Survey drops to full width (when visible) */
+  #surveyWrap{
+    width: 100%;
+    justify-content: stretch;
+  }
+  #surveyWrap select{
+    width: 100%;
+    max-width: none;
+  }
+
+  .chart-body{ padding: 8px; }
+  .card-head{ padding: 9px 10px; }
+
+  .mobile-chart-info{ display:block; }
+
+  .table-scroll{ max-height: 32vh; }
+
+  /* Hide desktop-only cols, show mobile-only cols */
+  .desktop-only{ display:none !important; }
+  .mobile-only{ display: table-cell !important; }
+
+  table{ font-size: .90rem; }
+  thead th, tbody td{ padding: 8px 9px; }
+
+  #aladinDiv{ height: 440px; }
+
+  /* Table footer visible on mobile */
+  .table-foot{ display:flex; }
+
+  /* Make header simpler on mobile */
+  #objectsCardHead{ justify-content: flex-start; }
+
+  /* On mobile the hint shouldn’t force width */
+  #tableHint{
+    margin-left: 0;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape){
+  .chart-body{ padding: 8px; }
+  .table-scroll{ max-height: 62vh; }
+  #aladinDiv{ height: 62vh; min-height: 260px; }
+}
