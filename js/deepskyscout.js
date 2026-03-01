@@ -7,6 +7,14 @@
   const RAD = Math.PI / 180;
   const DEG = 180 / Math.PI;
 
+  // Helpful runtime error logging (so a single JS error doesn't look like a freeze)
+  window.addEventListener("error", (e) => {
+    console.error("DeepSkyScout runtime error:", e?.error || e);
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    console.error("DeepSkyScout unhandled rejection:", e?.reason || e);
+  });
+
   let LOCATIONS = [];
   let TELESCOPES = [];
   let REDUCERS = [];
@@ -191,6 +199,462 @@
     return await res.json();
   }
 
+  async function fetchText(relPath) {
+    const res = await fetch(url(relPath), { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    return await res.text();
+  }
+
+
+
+  // -----------------------------
+  // Missing shared UI helpers
+  // -----------------------------
+  function debounce(fn, wait = 80){
+    let t = null;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), wait);
+    };
+  }
+
+  function clearAndAddStatusOption(sel, text){
+    if (!sel) return;
+    sel.innerHTML = "";
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = text;
+    opt.disabled = true;
+    opt.selected = true;
+    sel.appendChild(opt);
+  }
+
+  function populateSelectWithStatus(sel, ok, okMsg, errMsg, items, labeler){
+    if (!sel) return;
+
+    clearAndAddStatusOption(sel, ok ? okMsg : errMsg);
+
+    if (!ok || !Array.isArray(items) || items.length === 0) {
+      sel.disabled = true;
+      return;
+    }
+
+    items.forEach((item, idx) => {
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = String(labeler ? labeler(item, idx) : idx);
+      sel.appendChild(opt);
+    });
+
+    sel.disabled = false;
+    sel.selectedIndex = 1;
+  }
+
+  function getSelected(sel, items){
+    if (!Array.isArray(items) || items.length === 0) return null;
+    const idx = Number.parseInt(String(sel?.value ?? ""), 10);
+    if (Number.isFinite(idx) && items[idx] != null) return items[idx];
+    return items[0] ?? null;
+  }
+
+  function isSmartTelescope(scope){
+    return !!(scope && (scope.is_smart || scope.fixed_camera_name));
+  }
+
+  function getFixedCameraName(scope){
+    const name = String(scope?.fixed_camera_name || "").trim();
+    return name || null;
+  }
+
+  function ensureCustomTelescopeInList(){
+    if (!Array.isArray(TELESCOPES)) TELESCOPES = [];
+    const idx = TELESCOPES.findIndex(t => t?.is_custom);
+    if (idx >= 0) TELESCOPES[idx] = { ...TELESCOPES[idx], ...CUSTOM_TELESCOPE };
+    else TELESCOPES.push({ ...CUSTOM_TELESCOPE });
+  }
+
+  function updateCustomTelescopeFromInputs(){
+    const dEl = $("customScopeDiameter");
+    const fEl = $("customScopeFocal");
+
+    const d = Number(dEl?.value);
+    const f = Number(fEl?.value);
+
+    if (Number.isFinite(d) && d > 0) CUSTOM_TELESCOPE.aperture_mm = d;
+    if (Number.isFinite(f) && f > 0) CUSTOM_TELESCOPE.focal_mm = f;
+
+    ensureCustomTelescopeInList();
+
+    const idx = TELESCOPES.findIndex(t => t?.is_custom);
+    const sel = $("telescopeSelect");
+    const chosen = getSelected(sel, TELESCOPES);
+    if (sel && chosen?.is_custom && idx >= 0) sel.value = String(idx);
+
+    rebuildSmartCameraSet();
+    rebuildCameraSelect();
+    rebuildReducerSelect();
+    updateFovLabels();
+    refreshTableOnly();
+    updateCaption();
+    updateMobileChartInfo();
+    if (viewMode === "image") updateAladinFromSelection(true);
+  }
+
+  function updateCustomTelescopeUI(){
+    const wrap = $("customTelescopeFields");
+    if (!wrap) return;
+
+    const scope = getSelected($("telescopeSelect"), TELESCOPES);
+    const isCustom = !!scope?.is_custom;
+
+    wrap.style.display = isCustom ? "" : "none";
+
+    if (isCustom) {
+      if ($("customScopeDiameter")) $("customScopeDiameter").value = String(Number(scope?.aperture_mm) || CUSTOM_TELESCOPE.aperture_mm);
+      if ($("customScopeFocal")) $("customScopeFocal").value = String(Number(scope?.focal_mm) || CUSTOM_TELESCOPE.focal_mm);
+    }
+  }
+
+  function wireCustomTelescopeInputs(){
+    ["customScopeDiameter", "customScopeFocal"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener("input", updateCustomTelescopeFromInputs);
+      el.addEventListener("change", updateCustomTelescopeFromInputs);
+    });
+  }
+
+  function isDesktopWide(){
+    return window.matchMedia("(min-width: 1101px)").matches;
+  }
+
+  function updateAllResponsiveUI(){
+    enforceMobileAltAz();
+
+    const hint = $("tableHint");
+    if (hint) hint.textContent = isMobileNarrow() ? "Tap a row • Tap headers to sort" : "Click a row • Click headers to sort";
+
+    updateMobileChartInfo();
+  }
+
+  function parseHorizonFileText(text, filename = "horizon file"){
+    const pts = [];
+    const lines = String(text || "").split(/\r?\n/);
+
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#") || line.startsWith(";")) continue;
+
+      const m = line.match(/(-?\d+(?:\.\d+)?)\s*[,;\t ]+\s*(-?\d+(?:\.\d+)?)/);
+      if (!m) continue;
+
+      let az = Number(m[1]);
+      let alt = Number(m[2]);
+      if (!Number.isFinite(az) || !Number.isFinite(alt)) continue;
+
+      az = ((az % 360) + 360) % 360;
+      alt = clamp(alt, -5, 89.9);
+      pts.push({ az, alt });
+    }
+
+    if (pts.length < 2) throw new Error("Expected at least two azimuth/altitude rows.");
+
+    pts.sort((a, b) => a.az - b.az);
+
+    const deduped = [];
+    for (const p of pts) {
+      const prev = deduped[deduped.length - 1];
+      if (prev && Math.abs(prev.az - p.az) < 1e-9) prev.alt = p.alt;
+      else deduped.push(p);
+    }
+
+    if (deduped[0].az !== 0) deduped.unshift({ az: 0, alt: deduped[deduped.length - 1].alt });
+    if (deduped[deduped.length - 1].az !== 360) deduped.push({ az: 360, alt: deduped[0].alt });
+
+    return { name: filename, points: deduped };
+  }
+
+  function getHorizonFloorDeg(){
+    return clamp(Number(LAST_NUMERIC_HORIZON_DEG) || 0, 0, 89);
+  }
+
+  function getHorizonAtAzFn(){
+    if (HORIZON_MODE === "custom" && HORIZON_PROFILE?.points?.length) {
+      const pts = HORIZON_PROFILE.points;
+
+      return (azDeg) => {
+        let az = ((Number(azDeg) % 360) + 360) % 360;
+
+        for (let i = 1; i < pts.length; i++) {
+          const a = pts[i - 1];
+          const b = pts[i];
+          if (az >= a.az && az <= b.az) {
+            const span = Math.max(1e-9, b.az - a.az);
+            const t = (az - a.az) / span;
+            return a.alt + (b.alt - a.alt) * t;
+          }
+        }
+
+        return pts[pts.length - 1].alt;
+      };
+    }
+
+    const floor = getHorizonFloorDeg();
+    return () => floor;
+  }
+
+  function rebuildHorizonSelectOptions(){
+    const sel = $("horizonSelect");
+    if (!sel) return;
+
+    const current = (HORIZON_MODE === "custom" && HORIZON_PROFILE)
+      ? "__custom__"
+      : String(getHorizonFloorDeg());
+
+    sel.innerHTML = "";
+
+    [0, 10, 20, 30, 40].forEach((deg) => {
+      const opt = document.createElement("option");
+      opt.value = String(deg);
+      opt.textContent = `${deg}°`;
+      sel.appendChild(opt);
+    });
+
+    if (HORIZON_PROFILE) {
+      const custom = document.createElement("option");
+      custom.value = "__custom__";
+      custom.textContent = `Loaded horizon profile`;
+      sel.appendChild(custom);
+
+      const clear = document.createElement("option");
+      clear.value = "__clear__";
+      clear.textContent = "Clear loaded horizon";
+      sel.appendChild(clear);
+    }
+
+    const load = document.createElement("option");
+    load.value = "__load__";
+    load.textContent = "Load horizon file…";
+    sel.appendChild(load);
+
+    if ([...sel.options].some(o => o.value === current)) sel.value = current;
+  }
+
+  function updateHorizonStatus(){
+    rebuildHorizonSelectOptions();
+
+    const status = $("horizonFileStatus");
+    if (status) {
+      if (HORIZON_PROFILE) {
+        status.textContent = (HORIZON_MODE === "custom")
+          ? ` • Using file: ${HORIZON_PROFILE.name || "loaded horizon"}`
+          : ` • File loaded: ${HORIZON_PROFILE.name || "loaded horizon"}`;
+      } else {
+        status.textContent = " • No file loaded";
+      }
+    }
+
+    const sel = $("horizonSelect");
+    if (sel) {
+      if (HORIZON_MODE === "custom" && HORIZON_PROFILE) sel.value = "__custom__";
+      else sel.value = String(getHorizonFloorDeg());
+    }
+  }
+
+
+function normStateText(s){
+  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function slugStateText(s){
+  return normStateText(s).replace(/[^a-z0-9]+/g, "");
+}
+
+function getQueryParamValue(keys){
+  const params = new URLSearchParams(window.location.search);
+  for (const key of keys) {
+    const v = params.get(key);
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return null;
+}
+
+function parseBooleanParam(raw){
+  if (raw == null) return null;
+  const s = normStateText(raw);
+  if (["1","true","yes","on"].includes(s)) return true;
+  if (["0","false","no","off"].includes(s)) return false;
+  return null;
+}
+
+function findItemIndexByName(items, rawName){
+  if (!Array.isArray(items) || !rawName) return -1;
+  const targetNorm = normStateText(rawName);
+  const targetSlug = slugStateText(rawName);
+  let idx = items.findIndex(item => normStateText(item?.name) === targetNorm);
+  if (idx >= 0) return idx;
+  return items.findIndex(item => slugStateText(item?.name) === targetSlug);
+}
+
+function findOptionValueByText(sel, rawText){
+  if (!sel || !rawText) return null;
+  const targetNorm = normStateText(rawText);
+  const targetSlug = slugStateText(rawText);
+  for (const opt of Array.from(sel.options || [])) {
+    if (normStateText(opt.textContent) === targetNorm) return opt.value;
+    if (slugStateText(opt.textContent) === targetSlug) return opt.value;
+  }
+  return null;
+}
+
+function safeHorizonAssetPath(raw){
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const low = s.toLowerCase();
+  if (["1","true","yes","default","horizon.hrz"].includes(low)) return "assets/horizon.hrz";
+  if (/^assets\/[a-z0-9._\/-]+$/i.test(s) && /\.(hrz|csv|txt)$/i.test(s)) return s;
+  return null;
+}
+
+function basenameFromPath(path){
+  const parts = String(path || "").split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : "horizon file";
+}
+
+async function loadHorizonProfileFromAsset(relPath){
+  const text = await fetchText(relPath);
+  const profile = parseHorizonFileText(text, basenameFromPath(relPath));
+  profile.sourcePath = relPath;
+  HORIZON_PROFILE = profile;
+  HORIZON_MODE = "custom";
+  updateHorizonStatus();
+  return profile;
+}
+
+function getCurrentPlannerCameraName(){
+  const scope = getSelected($("telescopeSelect"), TELESCOPES);
+  if (isSmartTelescope(scope)) return getFixedCameraName(scope) || null;
+  const cam = getSelectedCamera();
+  return cam?.name || null;
+}
+
+function getCurrentHorizonSharePath(){
+  if (HORIZON_MODE === "custom" && HORIZON_PROFILE?.sourcePath && /^assets\//i.test(HORIZON_PROFILE.sourcePath)) {
+    return HORIZON_PROFILE.sourcePath;
+  }
+  return null;
+}
+
+function buildPlannerPermalink({ includeDefaultAssetHorizon = false } = {}){
+  const u = new URL(window.location.href);
+  u.search = "";
+  const params = u.searchParams;
+  if (isAdvancedModeEnabled()) params.set("advanced", "1");
+  const loc = getSelected($("locationSelect"), LOCATIONS);
+  if (loc?.name) params.set("location", loc.name);
+  const scope = getSelected($("telescopeSelect"), TELESCOPES);
+  if (scope?.name) params.set("telescope", scope.name);
+  const reducer = getSelectedReducer();
+  if (reducer?.name) params.set("reducer", reducer.name);
+  const camName = getCurrentPlannerCameraName();
+  if (camName) params.set("camera", camName);
+  if (scope?.is_custom) {
+    const ap = Number(CUSTOM_TELESCOPE.aperture_mm);
+    const fl = Number(CUSTOM_TELESCOPE.focal_mm);
+    if (Number.isFinite(ap) && ap > 0) params.set("custom_aperture", String(ap));
+    if (Number.isFinite(fl) && fl > 0) params.set("custom_focal", String(fl));
+  }
+  if (isAdvancedModeEnabled()) {
+    params.set("bortle", String(getBortleValue()));
+    params.set("rgb", String(getSNRBroadbandBand() || "V"));
+    params.set("ha", String(getSNRNebulaBandpassNm() || 20));
+  }
+  const horizonPath = includeDefaultAssetHorizon ? "assets/horizon.hrz" : getCurrentHorizonSharePath();
+  if (horizonPath) params.set("horizon", horizonPath);
+  return u.toString();
+}
+
+function replaceBrowserUrlFromState(){
+  try { window.history.replaceState(null, "", buildPlannerPermalink()); } catch (_err) {}
+}
+
+function updatePlannerLinkUI({ replaceBrowserUrl = false } = {}){
+  if (replaceBrowserUrl) replaceBrowserUrlFromState();
+}
+
+
+function wirePlannerLinkUI(){
+  const refresh = debounce(() => updatePlannerLinkUI({ replaceBrowserUrl: true }), 80);
+  ["advancedToggle","locationSelect","telescopeSelect","reducerSelect","cameraSelect","bortleSelect","snrBroadbandSelect","snrNebulaBandpassSelect","customScopeDiameter","customScopeFocal"].forEach((id) => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("change", refresh);
+    el.addEventListener("input", refresh);
+  });
+  updatePlannerLinkUI({ replaceBrowserUrl: true });
+}
+
+async function applyUrlStateFromQuery(){
+  const advanced = parseBooleanParam(getQueryParamValue(["advanced", "adv"]));
+  if (advanced != null) {
+    const advToggle = $("advancedToggle");
+    if (advToggle) advToggle.checked = advanced;
+    setAdvancedModeEnabled(advanced);
+  }
+  const locationRaw = getQueryParamValue(["location", "loc"]);
+  if (locationRaw) {
+    const idx = findItemIndexByName(LOCATIONS, locationRaw);
+    if (idx >= 0) $("locationSelect").value = String(idx);
+  }
+  const telescopeRaw = getQueryParamValue(["telescope", "scope"]);
+  if (telescopeRaw) {
+    const idx = findItemIndexByName(TELESCOPES, telescopeRaw);
+    if (idx >= 0) $("telescopeSelect").value = String(idx);
+  }
+  const apRaw = Number(getQueryParamValue(["custom_aperture", "aperture"]));
+  const flRaw = Number(getQueryParamValue(["custom_focal", "focal"]));
+  if (Number.isFinite(apRaw) && apRaw > 0 && $("customScopeDiameter")) $("customScopeDiameter").value = String(apRaw);
+  if (Number.isFinite(flRaw) && flRaw > 0 && $("customScopeFocal")) $("customScopeFocal").value = String(flRaw);
+  updateCustomTelescopeFromInputs();
+  updateCustomTelescopeUI();
+  rebuildCameraSelect();
+  rebuildReducerSelect();
+  const reducerRaw = getQueryParamValue(["reducer"]);
+  if (reducerRaw) {
+    const reducerVal = findOptionValueByText($("reducerSelect"), reducerRaw);
+    if (reducerVal != null && !$("reducerSelect").disabled) $("reducerSelect").value = reducerVal;
+  }
+  const cameraRaw = getQueryParamValue(["camera", "cam"]);
+  if (cameraRaw) {
+    const camVal = findOptionValueByText($("cameraSelect"), cameraRaw);
+    if (camVal != null && !$("cameraSelect").disabled) $("cameraSelect").value = camVal;
+  }
+  const bortleRaw = Number(getQueryParamValue(["bortle"]));
+  if (Number.isFinite(bortleRaw) && bortleRaw >= 1 && bortleRaw <= 9 && $("bortleSelect")) {
+    $("bortleSelect").value = String(Math.round(bortleRaw));
+    updateBortleSQMLabel();
+  }
+  const rgbRaw = String(getQueryParamValue(["rgb", "broadband"]) || "").toUpperCase();
+  if (["B","V","R"].includes(rgbRaw) && $("snrBroadbandSelect")) $("snrBroadbandSelect").value = rgbRaw;
+  const haRaw = String(getQueryParamValue(["ha", "halpha", "bandpass"]) || "");
+  if (["20","9","6","3"].includes(haRaw) && $("snrNebulaBandpassSelect")) $("snrNebulaBandpassSelect").value = haRaw;
+  const horizonPath = safeHorizonAssetPath(getQueryParamValue(["horizon"]));
+  if (horizonPath) {
+    try { await loadHorizonProfileFromAsset(horizonPath); } catch (err) { console.warn("Could not auto-load horizon from URL:", err); }
+  }
+  updateFovLabels();
+  updateDateUI();
+  SNR_CACHE.clear();
+  await recomputeVisibilityAndRender();
+  if (viewMode === "night") drawNightChart();
+  if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
+  if (viewMode === "image") updateAladinFromSelection(true);
+  updateCaption();
+  updateMobileChartInfo();
+  updatePlannerLinkUI({ replaceBrowserUrl: true });
+}
+
   function safe(v) {
     if (v === null || v === undefined || v === "") return "—";
     return String(v);
@@ -210,412 +674,622 @@
     return Number.isFinite(n) ? n.toFixed(2) : "—";
   }
 
-  function clearAndAddStatusOption(selectEl, text) {
-    selectEl.innerHTML = "";
-    const status = document.createElement("option");
-    status.disabled = true;
-    status.selected = true;
-    status.textContent = text;
-    selectEl.appendChild(status);
-  }
-
-  function fillOptionsIndex(selectEl, items, labelFn) {
-    items.forEach((item, idx) => {
-      const opt = document.createElement("option");
-      opt.value = String(idx);
-      opt.textContent = labelFn(item);
-      selectEl.appendChild(opt);
-    });
-    if (items.length > 0) selectEl.selectedIndex = 1;
-  }
-
-  function populateSelectWithStatus(selectEl, ok, okText, badText, items, labelFn) {
-    clearAndAddStatusOption(selectEl, ok ? okText : badText);
-    fillOptionsIndex(selectEl, items, labelFn);
-  }
-
+  
   // -----------------------------
-  // Custom telescope helpers
+  // Magnitudes (banded)
   // -----------------------------
-  function debounce(fn, ms){
-    let t = null;
-    return (...args) => {
-      if (t) clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
+  // Objects now store magnitudes per band: `mag_bands: { V, B, R }`.
+  // We display/sort using the first available band in the priority order below.
+  const MAG_BAND_PRIORITY = ["V", "B", "R"];
+
+  function getMagBandInfo(o){
+    const mb = o?.mag_bands;
+    if (mb && typeof mb === "object") {
+      for (const b of MAG_BAND_PRIORITY) {
+        const raw = mb[b];
+        if (raw === null || raw === undefined || raw === "") continue;
+        const v = Number(raw);
+        if (Number.isFinite(v)) return { band: b, mag: v };
+      }
+    }
+    // Backwards-compatible fallback (if any legacy files still have `magnitude`)
+    const rawLegacy = o?.magnitude;
+    if (rawLegacy !== null && rawLegacy !== undefined && rawLegacy !== "") {
+      const legacy = Number(rawLegacy);
+      if (Number.isFinite(legacy)) return { band: "", mag: legacy };
+    }
+    return null;
+  }
+
+  function getMagnitudeForSort(o){
+    const info = getMagBandInfo(o);
+    return info ? info.mag : NaN;
+  }
+
+  function formatObjectMagnitude(o){
+    const info = getMagBandInfo(o);
+    if (!info) return "—";
+    const magTxt = info.mag.toFixed(2);
+    return info.band ? `${magTxt} ${info.band}` : magTxt;
+  }
+
+  // ----------------------
+  
+  // -----------------------------
+  // Emission line fluxes (erg/s/cm²)
+  // -----------------------------
+  // New schema in JSON:
+  //   "line_flux_erg_s_cm2": { "Halpha": <float>, "OIII": <float>, "SII": <float> }
+  // Legacy schema still accepted:
+  //   "line_flux": { "ha": <float>, "oiii": <float>, "sii": <float> }
+  const LINE_PRIORITY = ["Halpha", "OIII", "SII", "ha", "oiii", "sii"];
+
+  function getLineFluxMap(o){
+    const lf = o?.line_flux_erg_s_cm2 ?? o?.line_flux ?? o?.lineFlux ?? null;
+    return (lf && typeof lf === "object") ? lf : null;
+  }
+
+  function getLineFluxInfo(o){
+    const lf = getLineFluxMap(o);
+    if (!lf) return null;
+
+    const norm = {
+      Halpha: lf.Halpha ?? lf.halpha ?? lf.Ha ?? lf.ha ?? lf.HA ?? lf["H-alpha"] ?? lf["Hα"],
+      OIII:   lf.OIII   ?? lf.oiii   ?? lf["O-III"] ?? lf["[OIII]"] ?? lf["OIII 5007"],
+      SII:    lf.SII    ?? lf.sii    ?? lf["S-II"]  ?? lf["[SII]"]
     };
-  }
 
-  function ensureCustomTelescopeInList(){
-    if (!Array.isArray(TELESCOPES)) TELESCOPES = [];
-    const existing = TELESCOPES.findIndex(t => t && t.is_custom);
-    if (existing >= 0) {
-      CUSTOM_TELESCOPE = TELESCOPES[existing];
-      return existing;
-    }
-    TELESCOPES.push(CUSTOM_TELESCOPE);
-    return TELESCOPES.length - 1;
-  }
-
-  function customTelescopeIndex(){
-    return Array.isArray(TELESCOPES) ? TELESCOPES.findIndex(t => t && t.is_custom) : -1;
-  }
-
-  function isCustomTelescopeSelected(){
-    const sel = $("telescopeSelect");
-    if (!sel) return false;
-    const idx = Number.parseInt(sel.value, 10);
-    return Number.isFinite(idx) && idx === customTelescopeIndex();
-  }
-
-  function updateCustomTelescopeOptionLabel(){
-    const idx = customTelescopeIndex();
-    if (idx < 0) return;
-
-    const sel = $("telescopeSelect");
-    if (!sel) return;
-
-    const opt = sel.querySelector(`option[value="${idx}"]`);
-    if (!opt) return;
-
-    const d = Number(CUSTOM_TELESCOPE.aperture_mm);
-    const f = Number(CUSTOM_TELESCOPE.focal_mm);
-
-    const dTxt = Number.isFinite(d) ? `${Math.round(d)}mm` : "—";
-    const fTxt = Number.isFinite(f) ? `${Math.round(f)}mm` : "—";
-
-    opt.textContent = `Custom telescope (D=${dTxt}, F=${fTxt})`;
-  }
-
-  function updateCustomTelescopeUI(){
-    const wrap = $("customTelescopeFields");
-    if (!wrap) return;
-
-    const show = isCustomTelescopeSelected();
-    wrap.style.display = show ? "" : "none";
-
-    if (show) {
-      const dIn = $("customScopeDiameter");
-      const fIn = $("customScopeFocal");
-      if (dIn) dIn.value = String(Math.round(Number(CUSTOM_TELESCOPE.aperture_mm) || 80));
-      if (fIn) fIn.value = String(Math.round(Number(CUSTOM_TELESCOPE.focal_mm) || 400));
+    for (const line of ["Halpha", "OIII", "SII"]) {
+      const v = Number(norm[line]);
+      if (Number.isFinite(v) && v > 0) return { line, flux: v };
     }
 
-    updateCustomTelescopeOptionLabel();
+    // Fallback: first positive numeric entry
+    for (const [k, val] of Object.entries(lf)) {
+      const v = Number(val);
+      if (Number.isFinite(v) && v > 0) return { line: String(k), flux: v };
+    }
+    return null;
   }
 
-  function updateCustomTelescopeFromInputs(){
-    if (!isCustomTelescopeSelected()) return;
+  // Legacy helper (kept for older code paths)
+  function getLineFlux(o, lineKey){
+    const lf = getLineFluxMap(o);
+    if (!lf) return null;
+    const v = Number(lf[lineKey]);
+    return (Number.isFinite(v) && v > 0) ? v : null;
+  }
 
-    const dIn = $("customScopeDiameter");
-    const fIn = $("customScopeFocal");
-    if (!dIn || !fIn) return;
+  function formatLineFlux(o){
+    const info = getLineFluxInfo(o);
+    if (!info) return "—";
+    return `${info.line}: ${info.flux.toExponential(2)} erg/s/cm²`;
+  }
 
-    const d = Number(dIn.value);
-    const f = Number(fIn.value);
+  // -----------------------------
+  // -----------------------------
+  // Advanced mode + SNR (ranking)
+  // -----------------------------
+  //
+  // This is an *approximate* physics-based SNR estimate intended for ranking.
+  // It converts:
+  //   - object brightness (either integrated line flux or integrated magnitude)
+  //   - sky brightness (Bortle -> SQM -> AB flux density)
+  // into photon counts over the *visible time above your horizon*.
+  // Then uses: SNR = S / sqrt(S + B)
+  //
+  // Notes:
+  // - Ignores read noise/dark current/seeing/PSF/aperture losses.
+  // - Treats objects as aperture-summed over their ellipse size.
+  // - Uses simple atmospheric extinction via airmass based on avg altitude.
 
-    if (Number.isFinite(d) && d > 0) CUSTOM_TELESCOPE.aperture_mm = d;
-    if (Number.isFinite(f) && f > 0) CUSTOM_TELESCOPE.focal_mm = f;
+  // AB zero point: 3631 Jy
+  const AB_FNU0_W_M2_HZ = 3631e-26; // W / m^2 / Hz
+  const C_MS = 2.99792458e8;
+  const H_J_S = 6.62607015e-34;
 
-    updateCustomTelescopeOptionLabel();
+  // Approx Bortle -> SQM (mag/arcsec^2). Tweak if you want.
+  const BORTLE_TO_SQM = {
+    1: 21.99,
+    2: 21.75,
+    3: 21.33,
+    4: 20.91,
+    5: 20.49,
+    6: 19.93,
+    7: 19.43,
+    8: 18.94,
+    9: 18.38,
+  };
 
-    // Recompute anything depending on focal length (FoV, filtering, Aladin)
-    updateFovLabels();
+  // Wavelength defaults for bands/lines (nm)
+  const BAND_LAMBDA_NM = { B: 440, V: 550, R: 650 };
+  const LINE_LAMBDA_NM = { Halpha: 656.3, OIII: 500.7, SII: 672.0 };
+
+  function photonEnergyJ(lambdaNm){
+    const lam = lambdaNm * 1e-9;
+    return (H_J_S * C_MS) / lam;
+  }
+
+  // Kasten & Young (1989) airmass approximation
+  function airmassFromAltDeg(altDeg){
+    const alt = Math.max(1, Math.min(90, Number(altDeg) || 0));
+    const z = 90 - alt;
+    const zr = z * RAD;
+    const cosz = Math.cos(zr);
+    return 1 / (cosz + 0.50572 * Math.pow(96.07995 - z, -1.6364));
+  }
+
+  function telescopeAreaM2(scope){
+    const dmm = Number(scope?.aperture_mm);
+    if (!Number.isFinite(dmm) || dmm <= 0) return null;
+    const d = dmm / 1000.0;
+    return Math.PI * Math.pow(d/2, 2);
+  }
+
+  function objectEllipseAreaArcsec2(o){
+    const majorArcmin = Number(o?.size_major_arcmin) || Number(o?.size) || 0;
+    const minorArcmin = Number(o?.size_minor_arcmin) || Number(o?.size) || majorArcmin;
+    const maj = Math.max(0, majorArcmin) * 60;
+    const minr = Math.max(0, minorArcmin) * 60;
+    if (!(maj > 0 && minr > 0)) return null;
+    return Math.PI * (maj/2) * (minr/2);
+  }
+
+  function magToPhotonFluxTotal(mag, lambdaNm, bandpassNm){
+    if (!Number.isFinite(mag)) return null;
+    const lam = lambdaNm * 1e-9;
+    const fnu = AB_FNU0_W_M2_HZ * Math.pow(10, -0.4 * mag); // W/m2/Hz
+    const flambda = fnu * (C_MS / (lam * lam)); // W/m2/m
+    const flambda_nm = flambda * 1e-9; // W/m2/nm
+    const F = flambda_nm * bandpassNm; // W/m2 (integrated)
+    const eph = photonEnergyJ(lambdaNm);
+    return F / eph; // photons/s/m2
+  }
+
+  function sqmToSkyPhotonFluxPerArcsec2(sqm, lambdaNm, bandpassNm){
+    if (!Number.isFinite(sqm)) return null;
+    const lam = lambdaNm * 1e-9;
+    const fnu = AB_FNU0_W_M2_HZ * Math.pow(10, -0.4 * sqm); // W/m2/Hz/arcsec2
+    const flambda = fnu * (C_MS / (lam * lam)); // W/m2/m/arcsec2
+    const flambda_nm = flambda * 1e-9; // W/m2/nm/arcsec2
+    const F = flambda_nm * bandpassNm; // W/m2/arcsec2
+    const eph = photonEnergyJ(lambdaNm);
+    return F / eph; // photons/s/m2/arcsec2
+  }
+
+  // Line flux is stored as erg/s/cm^2 (integrated over object).
+  // Convert to photons/s/m^2.
+  function lineFluxToPhotonFluxTotal(fluxErgSPerCm2, lambdaNm){
+    const f = Number(fluxErgSPerCm2);
+    if (!Number.isFinite(f) || f <= 0) return null;
+    const Wm2 = f * 1e-3; // (erg/s/cm^2) -> W/m^2
+    const eph = photonEnergyJ(lambdaNm);
+    return Wm2 / eph; // photons/s/m2
+  }
+
+  // Robust line-flux getter (supports different key spellings)
+  function getLineFluxMap(o){
+    const lf = o?.line_flux_erg_s_cm2;
+    if (!lf || typeof lf !== 'object') return {};
+    const out = {};
+    for (const [k,v] of Object.entries(lf)) {
+      const val = Number(v);
+      if (!Number.isFinite(val) || val <= 0) continue;
+      const kk = String(k).toLowerCase();
+      if (kk.includes('halpha') || kk in {'ha':1,'hα':1}) out.Halpha = val;
+      else if (kk.includes('oiii') || kk.includes('o3') || kk.includes('5007')) out.OIII = val;
+      else if (kk.includes('sii') || kk.includes('6716') || kk.includes('6731')) out.SII = val;
+    }
+    return out;
+  }
+
+  function isNebulaLike(o){
+    const t = String(o?.type ?? '').toLowerCase();
+    const st = String(o?.subtype ?? '').toLowerCase();
+    const n = String(o?.name ?? '').toLowerCase();
+    return (
+      t.includes('neb') || st.includes('neb') ||
+      t.includes('hii') || st.includes('hii') ||
+      t.includes('planetary') || st.includes('planetary') ||
+      t.includes('pn') || st.includes('pn') ||
+      t.includes('snr') || st.includes('snr') ||
+      n.startsWith('sh2')
+    );
+  }
+
+  function isAdvancedModeEnabled(){
+    return String(localStorage.getItem('ds_advanced') || '0') === '1';
+  }
+
+  function setAdvancedModeEnabled(enabled){
+    localStorage.setItem('ds_advanced', enabled ? '1' : '0');
+
+    const wrap = $('advancedControlsWrap');
+    if (wrap) wrap.style.display = enabled ? '' : 'none';
+
+    const hint = $('advancedColumnsHint');
+    if (hint) hint.style.display = enabled ? '' : 'none';
+
+    document.body.classList.toggle('advanced-on', !!enabled);
+
+    // force a re-render so columns appear/disappear
+    SNR_CACHE.clear();
     refreshTableOnly();
-
-    if (viewMode === "image") {
-      initAladinIfNeeded();
-      updateAladinFromSelection(true);
-    }
+    updateObjectsStatus();
     updateCaption();
     updateMobileChartInfo();
   }
 
-  function wireCustomTelescopeInputs(){
-    const dIn = $("customScopeDiameter");
-    const fIn = $("customScopeFocal");
-    if (!dIn || !fIn) return;
-
-    const onChange = debounce(() => updateCustomTelescopeFromInputs(), 120);
-    dIn.addEventListener("input", onChange);
-    fIn.addEventListener("input", onChange);
+  function getBortleValue(){
+    const el = $('bortleSelect');
+    const b = Number(el?.value || 4);
+    return Number.isFinite(b) ? Math.max(1, Math.min(9, b)) : 4;
   }
 
-  // -----------------------------
-  // Mobile-only layout tweaks
-  // -----------------------------
-  function updateTableLayoutForMobile(){
-    const mob = isMobileNarrow();
-    const head = $("objectsCardHead");
-    const foot = $("objectsFoot");
-    const typeWrap = $("typeFilterWrap");
-    const searchWrap = $("nameSearchWrap");
-    const hint = $("tableHint");
-
-    if (!head || !foot || !typeWrap || !searchWrap || !hint) return;
-
-    // ✅ ALWAYS keep hint in header
-    if (hint.parentElement !== head) head.appendChild(hint);
-
-    if (mob) {
-      // Move controls to footer on mobile
-      if (typeWrap.parentElement !== foot) foot.appendChild(typeWrap);
-      if (searchWrap.parentElement !== foot) foot.appendChild(searchWrap);
-    } else {
-      // Restore controls to header on desktop (before the hint)
-      if (typeWrap.parentElement !== head) head.insertBefore(typeWrap, hint);
-      if (searchWrap.parentElement !== head) head.insertBefore(searchWrap, hint);
-    }
+  function getSQMValue(){
+    const b = getBortleValue();
+    return BORTLE_TO_SQM[b] ?? 20.9;
   }
 
-  function updateControlsLayoutForMobile(){
-    const mob = isMobileNarrow();
-    const grid = $("setupGrid");
-    const telescopeRow = $("telescopeRow");
-    const horizonRow = $("horizonRow");
-    const reducerRow = $("reducerRow"); // anchor for desktop restore
-
-    if (!grid || !telescopeRow || !horizonRow || !reducerRow) return;
-
-    if (mob) {
-      // move Telescope between Location and Horizon
-      if (telescopeRow.nextElementSibling !== horizonRow) {
-        grid.insertBefore(telescopeRow, horizonRow);
-      }
-    } else {
-      // restore Telescope back before reducer (default desktop order)
-      if (telescopeRow.nextElementSibling !== reducerRow) {
-        grid.insertBefore(telescopeRow, reducerRow);
-      }
-    }
-  }
-
-  function isSmartTelescope(scope) {
-    const n = (scope?.name ?? "").toLowerCase();
-    return !!scope?.is_smart || !!scope?.isSmart || !!scope?.smart ||
-           n.includes("seestar") || n.includes("vespera") || n.includes("dwarf");
-  }
-
-  function getFixedCameraName(scope) {
-    return (scope?.fixed_camera_name || scope?.fixedCameraName || scope?.camera_name || scope?.cameraName || "");
-  }
-
-  function getSelected(selectEl, arr) {
-    const idx = Number.parseInt(selectEl.value, 10);
-    return Number.isFinite(idx) ? arr[idx] : arr[0];
-  }
-
-  function updateMobileSmartScopeUI(){
-    const scope = getSelected($("telescopeSelect"), TELESCOPES);
-    const smart = isSmartTelescope(scope);
-
-    const reducerRow = $("reducerRow");
-    const cameraRow  = $("cameraRow");
-    if (!reducerRow || !cameraRow) return;
-
-    if (isPhoneLike() && smart) {
-      reducerRow.style.display = "none";
-      cameraRow.style.display = "none";
-    } else {
-      reducerRow.style.display = "";
-      cameraRow.style.display = "";
-    }
-  }
-
-  function updateAllResponsiveUI(){
-    enforceMobileAltAz();
-    updateMobileSmartScopeUI();
-    updateControlsLayoutForMobile();
-    updateTableLayoutForMobile();
-    renderObjectsTable(); // ensures merged-name render stays correct when crossing breakpoint
-    updateMobileChartInfo();
-  }
-
-  function isDesktopWide(){ return window.matchMedia("(min-width: 1101px)").matches; }
-
-  // -----------------------------
-  // Horizon profile parsing
-  // -----------------------------
-  function normalizeAz360ForInput(az) {
-    const eps = 1e-9;
-    if (!Number.isFinite(az)) return NaN;
-    if (Math.abs(az - 360) < eps) return 360;
-    let a = az % 360;
-    if (a < 0) a += 360;
-    if (Math.abs(a) < eps && az > 0) return 360;
-    return a;
-  }
-
-  function normalizeAz(az) {
-    let a = az % 360;
-    if (a < 0) a += 360;
-    return a;
-  }
-
-  function extractFirstTwoNumbers(line) {
-    const m = String(line).match(/-?\d+(\.\d+)?/g);
-    if (!m || m.length < 2) return null;
-    const a = Number(m[0]);
-    const b = Number(m[1]);
-    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-    return [a, b];
-  }
-
-  function computeAltAt0FromWrap(sortedPtsNo0No360) {
-    if (!sortedPtsNo0No360 || sortedPtsNo0No360.length < 2) return null;
-    const first = sortedPtsNo0No360[0];
-    const last = sortedPtsNo0No360[sortedPtsNo0No360.length - 1];
-    const span = (first.az + 360) - last.az;
-    if (!(span > 0)) return first.alt;
-    const u = (360 - last.az) / span;
-    return last.alt + u * (first.alt - last.alt);
-  }
-
-  function parseHorizonFileText(text, filename = "horizon") {
-    const pts = [];
-    const lines = String(text).split(/\r?\n/);
-
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) continue;
-      if (line.startsWith("#") || line.startsWith("//")) continue;
-
-      const nums = extractFirstTwoNumbers(line);
-      if (!nums) continue;
-
-      const az = normalizeAz360ForInput(nums[0]);
-      const alt = Number(nums[1]);
-
-      if (!Number.isFinite(az) || !Number.isFinite(alt)) continue;
-      pts.push({ az, alt });
-    }
-
-    if (pts.length < 2) throw new Error("Horizon file must contain at least 2 valid lines with: az_deg, alt_deg (comma/tab/space separated).");
-
-    pts.sort((a,b) => a.az - b.az);
-
-    const dedup = [];
-    for (const p of pts) {
-      if (dedup.length && Math.abs(dedup[dedup.length - 1].az - p.az) < 1e-9) dedup[dedup.length - 1] = p;
-      else dedup.push(p);
-    }
-
-    let has0 = dedup.length && Math.abs(dedup[0].az - 0) < 1e-9;
-    let has360 = dedup.length && Math.abs(dedup[dedup.length - 1].az - 360) < 1e-9;
-
-    const no0no360 = dedup.filter(p => p.az > 0 && p.az < 360);
-
-    let alt0 = null;
-    if (has0) alt0 = dedup[0].alt;
-    else if (has360) alt0 = dedup[dedup.length - 1].alt;
-    else alt0 = computeAltAt0FromWrap(no0no360.length ? no0no360 : dedup);
-
-    if (!Number.isFinite(alt0)) alt0 = dedup[0].alt;
-
-    if (!has0) dedup.unshift({ az: 0, alt: alt0 });
-    if (!has360) dedup.push({ az: 360, alt: alt0 });
-
-    dedup[dedup.length - 1].alt = dedup[0].alt;
-
-    return { filename, points: dedup };
-  }
-
-  function customHorizonAltAtAz(azDeg) {
-    if (!HORIZON_PROFILE) return NaN;
-    const pts = HORIZON_PROFILE.points;
-    const a = normalizeAz(azDeg);
-
-    let lo = 0, hi = pts.length - 1;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if (pts[mid].az <= a) lo = mid;
-      else hi = mid;
-    }
-
-    const p0 = pts[lo];
-    const p1 = pts[hi];
-    const span = (p1.az - p0.az) || 1;
-    const u = (a - p0.az) / span;
-    return p0.alt + u * (p1.alt - p0.alt);
-  }
-
-  function getHorizonFloorDeg() {
-    const v = Number(LAST_NUMERIC_HORIZON_DEG);
-    return Number.isFinite(v) ? v : 20;
-  }
-
-  function getHorizonAtAzFn() {
-    if (HORIZON_MODE === "custom" && HORIZON_PROFILE) {
-      return (az) => {
-        const v = customHorizonAltAtAz(az);
-        return Number.isFinite(v) ? v : 0;
-      };
-    }
-    const floor = getHorizonFloorDeg();
-    return (_az) => floor;
-  }
-
-  function rebuildHorizonSelectOptions() {
-    const sel = $("horizonSelect");
-
-    const numeric = [
-      { v:"0",  t:"0°"  },
-      { v:"10", t:"10°" },
-      { v:"20", t:"20°" },
-      { v:"30", t:"30°" },
-      { v:"40", t:"40°" }
-    ];
-
-    sel.innerHTML = "";
-    for (const o of numeric) {
-      const opt = document.createElement("option");
-      opt.value = o.v;
-      opt.textContent = o.t;
-      sel.appendChild(opt);
-    }
-
-    const sep = document.createElement("option");
-    sep.disabled = true;
-    sep.textContent = "— Custom horizon —";
-    sel.appendChild(sep);
-
-    if (HORIZON_PROFILE) {
-      const customOpt = document.createElement("option");
-      customOpt.value = "__custom__";
-      customOpt.textContent = `Custom horizon (${HORIZON_PROFILE.filename})`;
-      sel.appendChild(customOpt);
-    }
-
-    const loadOpt = document.createElement("option");
-    loadOpt.value = "__load__";
-    loadOpt.textContent = HORIZON_PROFILE ? "Load/Replace custom horizon…" : "Load custom horizon…";
-    sel.appendChild(loadOpt);
-
-    const clearOpt = document.createElement("option");
-    clearOpt.value = "__clear__";
-    clearOpt.textContent = "Clear custom horizon";
-    clearOpt.disabled = !HORIZON_PROFILE;
-    sel.appendChild(clearOpt);
-
-    if (HORIZON_MODE === "custom" && HORIZON_PROFILE) sel.value = "__custom__";
-    else {
-      sel.value = String(LAST_NUMERIC_HORIZON_DEG);
-      if (![...sel.options].some(o => o.value === sel.value)) sel.value = "20";
-    }
-  }
-
-  function updateHorizonStatus() {
-    const el = $("horizonFileStatus");
+  function updateBortleSQMLabel(){
+    const el = $('bortleSQMLabel');
     if (!el) return;
+    const sqm = getSQMValue();
+    el.textContent = ` • SQM: ${sqm.toFixed(2)} mag/arcsec²`;
+  }
 
-    if (!HORIZON_PROFILE) {
-      el.textContent = " • No file loaded";
-      if (HORIZON_MODE === "custom") HORIZON_MODE = "numeric";
-    } else {
-      el.textContent = ` • Custom: ${HORIZON_PROFILE.filename}`;
+
+  // Populate/refresh the Bortle dropdown labels to include SQM, without changing the stored value.
+  function ensureBortleOptions(){
+    const sel = $("bortleSelect");
+    if (!sel) return;
+
+    // If the HTML already has options, keep the values but rewrite labels.
+    const vals = [];
+    for (const opt of Array.from(sel.options)) {
+      const v = Number(opt.value);
+      if (Number.isFinite(v) && v >= 1 && v <= 9) vals.push(v);
     }
 
-    rebuildHorizonSelectOptions();
+    const keepCurrent = sel.value;
+
+    // If nothing usable exists, build 1..9.
+    if (vals.length === 0) {
+      sel.innerHTML = "";
+      for (let b = 1; b <= 9; b++) {
+        const opt = document.createElement('option');
+        opt.value = String(b);
+        sel.appendChild(opt);
+      }
+    }
+
+    // Rewrite labels with SQM.
+    for (const opt of Array.from(sel.options)) {
+      const b = Number(opt.value);
+      if (!Number.isFinite(b) || b < 1 || b > 9) continue;
+      const sqm = BORTLE_TO_SQM[b];
+      const sqmTxt = Number.isFinite(sqm) ? `${sqm.toFixed(1)} mag/arcsec²` : "—";
+      opt.textContent = `Bortle ${b} (≈ ${sqmTxt})`;
+    }
+
+    if (keepCurrent && Array.from(sel.options).some(o => o.value === keepCurrent)) sel.value = keepCurrent;
+    updateBortleSQMLabel();
   }
+
+  // Apply the current advanced-mode state to the DOM (columns + panel) and refresh derived values.
+  function updateAdvancedUI(){
+    const enabled = isAdvancedModeEnabled();
+
+    // Body class controls CSS visibility for .advanced-only
+    document.body.classList.toggle('advanced-on', enabled);
+
+    // Toggle the advanced panel block
+    const panel = $("advancedControlsWrap") || $("advancedPanel");
+    if (panel) panel.style.display = enabled ? "" : "none";
+
+    // Sync the checkbox
+    const cb = $("advancedToggle");
+    if (cb) cb.checked = enabled;
+
+    // Keep Bortle/SNR selects coherent
+    ensureBortleOptions();
+    ensureSNRSelectOptions();
+
+    // Refresh the table so the SNR column updates instantly
+    refreshTableOnly();
+    updateObjectsStatus();
+  }
+
+  // Back-compat wrapper: earlier revisions called this name.
+  function wireAdvancedModeControls(){
+    wireAdvancedModeToggle();
+
+    // If the user changes any advanced inputs, refresh SNR/rows.
+    const rerun = () => {
+      if (!isAdvancedModeEnabled()) return;
+      SNR_CACHE.clear();
+      refreshTableOnly();
+      updateObjectsStatus();
+      updateCaption();
+      updateMobileChartInfo();
+    };
+
+    const ids = ["bortleSelect","snrBroadbandSelect","snrNebulaBandpassSelect"];
+    for (const id of ids) {
+      const el = $(id);
+      if (!el) continue;
+      el.addEventListener('change', rerun);
+      el.addEventListener('input', rerun);
+    }
+
+    // Make sure initial UI state is applied
+    updateAdvancedUI();
+  }
+
+  const RGB_FILTER_TO_BAND = { B: 'B', V: 'V', R: 'R' };
+  const BANDPASS_NM = {
+    B: 90.0,
+    V: 85.0,
+    R: 150.0,
+    I: 150.0,
+    g: 140.0,
+    r: 140.0,
+    i: 150.0
+  };
+
+  function getSNRBroadbandBand(){
+    const el = $('snrBroadbandSelect');
+    const v = String(el?.value || 'V').toUpperCase();
+    return RGB_FILTER_TO_BAND[v] ? v : 'V';
+  }
+
+  function getPreferredMagBandInfo(o, preferredBand){
+    const mb = o?.mag_bands;
+    if (!mb || typeof mb !== 'object') return null;
+    const exactRaw = mb[preferredBand];
+    if (exactRaw === null || exactRaw === undefined || exactRaw === '') return null;
+    const exactVal = Number(exactRaw);
+    if (!Number.isFinite(exactVal)) return null;
+    return { band: preferredBand, mag: exactVal, requestedBand: preferredBand };
+  }
+
+  function getBroadbandBandpassNm(band){
+    return BANDPASS_NM[band] || 100.0;
+  }
+
+  function getSNRNebulaBandpassNm(){
+    const el = $('snrNebulaBandpassSelect');
+    const raw = Number(el?.value);
+    if (raw === 20 || raw === 9 || raw === 6 || raw === 3) return raw;
+
+    const scope = getSelected($('telescopeSelect'), TELESCOPES);
+    return isSmartTelescope(scope) ? 20 : 6;
+  }
+
+  function getObjectSNRRigMode(o){
+    return isNebulaLike(o) ? 'narrowband' : 'broadband';
+  }
+
+  function getRigBandpassNm(scope, rigMode, broadbandBand = 'V'){
+    if (rigMode === 'narrowband') return getSNRNebulaBandpassNm();
+    return getBroadbandBandpassNm(broadbandBand);
+  }
+
+  function getRigEfficiency(scope, rigMode){
+    if (isSmartTelescope(scope)) return (rigMode === 'narrowband') ? 0.22 : 0.28;
+    return (rigMode === 'narrowband') ? 0.30 : 0.35;
+  }
+
+  const SNR_CACHE = new Map();
+  const SNR_SCORE_CAP = 10000;
+
+  function computeSNRScoreForIdx(idx){
+    if (!isAdvancedModeEnabled()) return null;
+
+    const o = OBJECTS?.[idx];
+    if (!o) return null;
+
+    const vis = VIS_RESULTS.get(idx);
+    const tSec = Number(vis?.visibleSec ?? 0);
+    if (!(tSec > 0)) return null;
+
+    const scope = getSelected($('telescopeSelect'), TELESCOPES);
+    const red = getSelectedReducer();
+    const cam = getSelectedCamera();
+
+    const bortle = getBortleValue();
+    const sqm = getSQMValue();
+
+    const mode = getObjectSNRRigMode(o);
+    const lineWanted = (mode === 'narrowband') ? 'Halpha' : null;
+    const broadbandBand = getSNRBroadbandBand();
+    const broadbandMagInfo = (mode === 'broadband') ? getPreferredMagBandInfo(o, broadbandBand) : null;
+    const actualBroadbandBand = broadbandMagInfo?.band || broadbandBand;
+    const bandpassNm = getRigBandpassNm(scope, mode, actualBroadbandBand);
+    const eff = getRigEfficiency(scope, mode);
+    const nebulaBandpassNm = getSNRNebulaBandpassNm();
+
+    // caching key (only recompute when inputs change)
+    const key = JSON.stringify({
+      idx,
+      mode,
+      lineWanted,
+      bandpassNm,
+      broadbandBand,
+      actualBroadbandBand,
+      nebulaBandpassNm,
+      bortle,
+      sqm,
+      scope: scope?.name || '',
+      d: Number(scope?.aperture_mm) || 0,
+      f: Number(scope?.focal_mm) || 0,
+      red: Number(red?.factor) || 1,
+      cam: cam?.name || '',
+      t: Math.round(tSec),
+    });
+
+    if (SNR_CACHE.has(key)) return SNR_CACHE.get(key);
+
+    const A = telescopeAreaM2(scope);
+    const objArea = objectEllipseAreaArcsec2(o);
+
+    if (!A) { SNR_CACHE.set(key, null); return null; }
+    if (!(Number.isFinite(objArea) && objArea > 0)) { SNR_CACHE.set(key, null); return null; }
+
+    // Altitude/airmass factor
+    const alt = (Number.isFinite(vis?.avgAltDeg) ? vis.avgAltDeg : vis?.maxAltDeg);
+    const X = airmassFromAltDeg(alt || 45);
+    const kMag = (mode === 'narrowband') ? 0.12 : 0.20;
+    const trans = Math.pow(10, -0.4 * kMag * (X - 1));
+
+    // Pick wavelength
+    let lambdaNm = 550;
+    if (mode === 'narrowband') lambdaNm = LINE_LAMBDA_NM.Halpha || 656.3;
+    else {
+      lambdaNm = BAND_LAMBDA_NM[actualBroadbandBand] || 550;
+    }
+
+    // Signal photons
+    let S_phot_per_s_m2 = null;
+    if (mode === 'narrowband') {
+      const lf = getLineFluxMap(o);
+      const fLine = lf.Halpha;
+      if (Number.isFinite(fLine) && fLine > 0) {
+        S_phot_per_s_m2 = lineFluxToPhotonFluxTotal(fLine, lambdaNm);
+      }
+    }
+
+    // fallback: integrated magnitude is only valid for broadband mode
+    if (S_phot_per_s_m2 == null && mode === 'broadband') {
+      const mag = broadbandMagInfo?.mag;
+      if (Number.isFinite(mag)) {
+        S_phot_per_s_m2 = magToPhotonFluxTotal(mag, lambdaNm, bandpassNm);
+      }
+    }
+
+    if (S_phot_per_s_m2 == null) { SNR_CACHE.set(key, null); return null; }
+
+    // Sky photons per arcsec^2
+    const sky_phot_per_s_m2_arcsec2 = sqmToSkyPhotonFluxPerArcsec2(sqm, lambdaNm, bandpassNm);
+    if (sky_phot_per_s_m2_arcsec2 == null) { SNR_CACHE.set(key, null); return null; }
+
+    const t = tSec;
+    // Convert integrated fluxes to a *surface brightness* proxy, then estimate SNR
+    // for a small measurement aperture (in pixels). This avoids silly 999+ SNR values
+    // from summing the entire object.
+
+    const scaleArcsecPerPx = computeImageScaleArcsecPerPixel();
+    const pixAreaArcsec2 = (scaleArcsecPerPx && Number.isFinite(scaleArcsecPerPx))
+      ? Math.max(0.05, Math.min(200, scaleArcsecPerPx * scaleArcsecPerPx))
+      : 4.0;
+
+    const AP_PX = 25; // 5×5 pixel box (tweak if you want)
+    const apAreaArcsec2 = pixAreaArcsec2 * AP_PX;
+
+    const S_surf = S_phot_per_s_m2 / Math.max(1, objArea); // photons/s/m2/arcsec2
+    const B_surf = sky_phot_per_s_m2_arcsec2;             // photons/s/m2/arcsec2
+
+    // Apply extinction/transmission to signal, and airmass scaling to sky
+    const S = S_surf * apAreaArcsec2 * A * eff * t * trans;
+    const B = B_surf * apAreaArcsec2 * A * eff * t * X;
+
+    const snr = (S > 0) ? (S / Math.sqrt(S + B + 1e-12)) : 0;
+    const out = Number.isFinite(snr) ? Math.max(0, Math.min(SNR_SCORE_CAP, snr)) : null;
+    SNR_CACHE.set(key, out);
+    return out;
+  }
+
+  function formatSNRScore(score){
+    if (score == null || !Number.isFinite(score)) return '—';
+    if (score >= 100) return score.toFixed(0);
+    return score.toFixed(1);
+  }
+
+  function ensureSNRSelectOptions(){
+    const bbSel = $('snrBroadbandSelect');
+    if (bbSel && bbSel.options.length === 0) {
+      bbSel.innerHTML = '';
+      const opts = [
+        ['B', 'Blue (B)'],
+        ['V', 'Green (V)'],
+        ['R', 'Red (R)'],
+      ];
+      for (const [value, label] of opts) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        bbSel.appendChild(opt);
+      }
+    }
+    if (bbSel && !['B','V','R'].includes(String(bbSel.value || '').toUpperCase())) {
+      bbSel.value = 'V';
+    }
+
+    const nbSel = $('snrNebulaBandpassSelect');
+    if (nbSel && nbSel.options.length === 0) {
+      nbSel.innerHTML = '';
+      const opts = [
+        ['20', '20 nm (Smart Scopes)'],
+        ['9',  '9 nm'],
+        ['6',  '6 nm'],
+        ['3',  '3 nm'],
+      ];
+      for (const [value, label] of opts) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = label;
+        nbSel.appendChild(opt);
+      }
+    }
+    if (nbSel && !['20','9','6','3'].includes(String(nbSel.value || ''))) {
+      nbSel.value = '20';
+    }
+  }
+
+  function wireAdvancedModeToggle(){
+    const adv = $('advancedToggle');
+    if (!adv) return;
+    adv.checked = isAdvancedModeEnabled();
+    setAdvancedModeEnabled(adv.checked);
+
+    adv.addEventListener('change', () => {
+      setAdvancedModeEnabled(adv.checked);
+    });
+
+    const bortle = $('bortleSelect');
+    if (bortle) {
+      bortle.addEventListener('change', () => {
+        updateBortleSQMLabel();
+        SNR_CACHE.clear();
+        refreshTableOnly();
+        updateCaption();
+        updateMobileChartInfo();
+      });
+    }
+
+    const snrBroadbandSel = $('snrBroadbandSelect');
+    const snrNebulaBandpassSel = $('snrNebulaBandpassSelect');
+
+    if (snrBroadbandSel) {
+      snrBroadbandSel.addEventListener('change', () => {
+        SNR_CACHE.clear();
+        refreshTableOnly();
+        updateCaption();
+        updateMobileChartInfo();
+      });
+    }
+
+    if (snrNebulaBandpassSel) {
+      snrNebulaBandpassSel.addEventListener('change', () => {
+        SNR_CACHE.clear();
+        refreshTableOnly();
+        updateCaption();
+        updateMobileChartInfo();
+      });
+    }
+  }
+
+
 
   // -----------------------------
   // Smart camera / reducer selects
@@ -1370,7 +2044,7 @@
   }
 
   function setHeaderArrows() {
-    const keys = ["name","common_name","magnitude","size","type","subtype","visibility"];
+    const keys = ["name","common_name","magnitude","size","type","subtype","snr","visibility"];
 
     for (const k of keys) {
       const el = document.getElementById(`arrow-${k}`);
@@ -1379,19 +2053,24 @@
     // mobile visibility arrow (second col)
     const vm = document.getElementById("arrow-visibility-m");
     if (vm) vm.textContent = (sortState.key === "visibility") ? ((sortState.dir === "asc") ? "▲" : "▼") : "";
+
+    // mobile SNR arrow (if present)
+    const sm = document.getElementById("arrow-snr-m");
+    if (sm) sm.textContent = (sortState.key === "snr") ? ((sortState.dir === "asc") ? "▲" : "▼") : "";
   }
 
   function sortLabel() {
-    const map = { name:"Name", common_name:"Common Name", magnitude:"Mag", size:"Size", type:"Type", subtype:"Subtype", visibility:"Visibility" };
+    const map = { name:"Name", common_name:"Common Name", magnitude:"Mag", size:"Size", type:"Type", subtype:"Subtype", snr:"SNR", visibility:"Visibility" };
     return `${map[sortState.key] || sortState.key} (${sortState.dir === "asc" ? "ascending" : "descending"})`;
   }
 
   function getSortValue(idx, key) {
     const o = OBJECTS[idx];
     switch (key) {
-      case "visibility": return VIS_RESULTS.get(idx)?.visibleSec ?? 0;
+      case "snr": return computeSNRScoreForIdx(idx) ?? 0;
+        case "visibility": return VIS_RESULTS.get(idx)?.visibleSec ?? 0;
       case "magnitude": {
-        const m = parseMagnitude(o?.magnitude);
+        const m = parseMagnitude(getMagnitudeForSort(o));
         return Number.isFinite(m) ? m : 99;
       }
       case "size": return sizeNumeric(o);
@@ -1467,11 +2146,15 @@
         <!-- mobile visibility (2nd col) -->
         <td class="vis-cell mobile-only">${visH.toFixed(2)}h</td>
 
+        <td class="snr-cell advanced-only mobile-only">${formatSNRScore(computeSNRScoreForIdx(idx))}</td>
+
         <td class="desktop-only">${safe(o.common_name)}</td>
-        <td>${formatMagnitude(o.magnitude)}</td>
-        <td>${formatSize(o)}</td>
+        <td class="advanced-only desktop-only">${formatObjectMagnitude(o)}</td>
+        <td class="advanced-only desktop-only">${formatSize(o)}</td>
         <td>${safe(o.type)}</td>
         <td class="desktop-only">${safe(o.subtype)}</td>
+
+        <td class="snr-cell advanced-only desktop-only">${formatSNRScore(computeSNRScoreForIdx(idx))}</td>
 
         <!-- desktop visibility (last col) -->
         <td class="vis-cell desktop-only">${visH.toFixed(2)}h</td>
@@ -1487,7 +2170,7 @@
     FILTERED_INDICES.sort(compareIdx);
 
     if (FILTERED_INDICES.length === 0) {
-      $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">No objects match your filters.</td></tr>`;
+      $("objectsTbody").innerHTML = `<tr><td colspan="10" class="muted" style="padding:12px;">No objects match your filters.</td></tr>`;
       setHeaderArrows();
       selectedObjectIdx = null;
       if (viewMode === "night") drawNightChart();
@@ -1520,7 +2203,7 @@
     updateDateUI();
 
     $("objectsStatus").textContent = "⏳ Calculating visibility…";
-    $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">Calculating…</td></tr>`;
+    $("objectsTbody").innerHTML = `<tr><td colspan="10" class="muted" style="padding:12px;">Calculating…</td></tr>`;
 
     await new Promise(r => setTimeout(r, 0));
 
@@ -1586,14 +2269,25 @@
     }
 
     const d = buildTonightData(loc);
+      const magTxt = formatObjectMagnitude(obj);
+      const magHtml = (magTxt !== "—") ? `&nbsp;•&nbsp; Mag: <code>${magTxt}</code>` : "";
 
-    box.innerHTML = `
+      const adv = isAdvancedModeEnabled();
+      const lineInfo = adv ? getLineFluxInfo(obj) : null;
+      const lineHtml = (adv && lineInfo)
+        ? `&nbsp;•&nbsp; ${lineInfo.line} flux: <code>${lineInfo.flux.toExponential(2)} erg/s/cm²</code>`
+        : "";
+
+      const snrHtml = adv
+        ? `&nbsp;•&nbsp; SNR score: <code>${formatSNRScore(computeSNRScoreForIdx(selectedObjectIdx))}</code> <span class="muted">(Bortle ${getBortleValue()})</span>`
+        : "";
+box.innerHTML = `
       <div class="t1">${safe(getObjectDisplayNamePlain(obj))}</div>
       <div class="t2">
         Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
         &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
         &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
-        ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}
+        ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}${magHtml}${lineHtml}${snrHtml}
       </div>
     `;
     box.style.display = "";
@@ -1634,8 +2328,19 @@
     const nameLine = (typeof formatNameWithOptionalCommon === "function")
       ? formatNameWithOptionalCommon(obj)
       : getObjectDisplayNamePlain(obj);
+      const magTxt = formatObjectMagnitude(obj);
+      const magHtml = (magTxt !== "—") ? `&nbsp;•&nbsp; Mag: <code>${magTxt}</code>` : "";
 
-    // ---------- TONIGHT ----------
+      const adv = isAdvancedModeEnabled();
+      const lineInfo = adv ? getLineFluxInfo(obj) : null;
+      const lineHtml = (adv && lineInfo)
+        ? `&nbsp;•&nbsp; ${lineInfo.line} flux: <code>${lineInfo.flux.toExponential(2)} erg/s/cm²</code>`
+        : "";
+
+      const snrHtml = adv
+        ? `&nbsp;•&nbsp; SNR score: <code>${formatSNRScore(computeSNRScoreForIdx(selectedObjectIdx))}</code> <span class="muted">(Bortle ${getBortleValue()})</span>`
+        : "";
+// ---------- TONIGHT ----------
     if (viewMode === "night") {
       // Mobile stays compact (mobile already shows the detailed box above the canvas)
       if (isMobileNarrow()) {
@@ -1652,7 +2357,7 @@
           Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
           &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
           &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
-          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}
+          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}${magHtml}${lineHtml}${snrHtml}
         </div>
       `;
       return;
@@ -1682,7 +2387,7 @@
           Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
           &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
           &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
-          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}
+          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}${magHtml}${lineHtml}${snrHtml}
         </div>
       `;
       return;
@@ -1707,7 +2412,7 @@
       <div style="margin-top:4px;">
         Year: <code>${YEAR_DATA.year}</code>
         &nbsp;•&nbsp; Best month (mid-month sample): <code>${bestLabel}</code>
-        &nbsp;•&nbsp; Max: <code>${maxH.toFixed(2)}h</code>
+        &nbsp;•&nbsp; Max: <code>${maxH.toFixed(2)}h</code>${magHtml}${lineHtml}${snrHtml}
       </div>
     `;
   }
@@ -2279,7 +2984,7 @@
         sortState.dir = (sortState.dir === "asc") ? "desc" : "asc";
       } else {
         sortState.key = key;
-        sortState.dir = (key === "visibility") ? "desc" : "asc";
+        sortState.dir = (key === "visibility" || key === "snr") ? "desc" : "asc";
         if (key === "magnitude") sortState.dir = "asc";
       }
 
@@ -2469,7 +3174,7 @@
       updateMobileChartInfo();
     } else {
       $("objectsStatus").textContent = `❌ Objects not loaded: ${loadState.objects.err || "unknown"}`;
-      $("objectsTbody").innerHTML = `<tr><td colspan="8" class="muted" style="padding:12px;">No objects loaded.</td></tr>`;
+      $("objectsTbody").innerHTML = `<tr><td colspan="10" class="muted" style="padding:12px;">No objects loaded.</td></tr>`;
     }
   }
 
@@ -2522,6 +3227,7 @@
         if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
         updateCaption();
         updateMobileChartInfo();
+        updatePlannerLinkUI({ replaceBrowserUrl: true });
         return;
       }
 
@@ -2534,10 +3240,12 @@
           if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
           updateCaption();
           updateMobileChartInfo();
+          updatePlannerLinkUI({ replaceBrowserUrl: true });
         } else {
           HORIZON_MODE = "numeric";
           updateHorizonStatus();
         }
+        updatePlannerLinkUI({ replaceBrowserUrl: true });
         return;
       }
 
@@ -2552,6 +3260,7 @@
         if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
         updateCaption();
         updateMobileChartInfo();
+        updatePlannerLinkUI({ replaceBrowserUrl: true });
       }
     });
 
@@ -2574,6 +3283,7 @@
       try {
         const text = await file.text();
         HORIZON_PROFILE = parseHorizonFileText(text, file.name);
+        if (HORIZON_PROFILE) delete HORIZON_PROFILE.sourcePath;
         HORIZON_MODE = "custom";
         updateHorizonStatus();
 
@@ -2582,10 +3292,12 @@
         if (viewMode === "year") { computeYearIfPossible(); drawYearChart(); }
         updateCaption();
         updateMobileChartInfo();
+        updatePlannerLinkUI({ replaceBrowserUrl: true });
       } catch (err) {
         HORIZON_PROFILE = null;
         HORIZON_MODE = "numeric";
         updateHorizonStatus();
+        updatePlannerLinkUI({ replaceBrowserUrl: true });
         alert(`Could not load horizon file:\n${err?.message || err}`);
       }
     });
@@ -2614,10 +3326,19 @@
     wireCustomTelescopeInputs();
     updateCustomTelescopeUI();
 
+    // Advanced mode controls (optional)
+    ensureBortleOptions();
+    ensureSNRSelectOptions();
+    updateAdvancedUI();
+    wireAdvancedModeControls();
+    wirePlannerLinkUI();
+    await applyUrlStateFromQuery();
+
     $("viewNight").checked = true;
     setViewMode("night");
 
     updateAllResponsiveUI();
+    updatePlannerLinkUI({ replaceBrowserUrl: true });
     updateCaption();
     drawNightChart();
     updateMobileChartInfo();
