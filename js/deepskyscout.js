@@ -390,7 +390,46 @@
     if (hint) hint.textContent = isMobileNarrow() ? "Tap a row • Tap headers to sort" : "Click a row • Click headers to sort";
 
     updateMobileChartInfo();
+
+    applyObjectsTableColumnVisibility();
   }
+
+
+// Keep object table columns aligned when toggling Advanced mode or switching mobile/desktop.
+// This uses inline display rules to avoid CSS specificity causing mismatched visible columns.
+function applyObjectsTableColumnVisibility(){
+  const tbody = $("objectsTbody");
+  if (!tbody) return;
+  const table = tbody.closest("table");
+  if (!table) return;
+
+  const adv = isAdvancedModeEnabled();
+  const mob = isMobileNarrow();
+
+  function shouldShow(el){
+    let show = true;
+    if (el.classList.contains('mobile-only')) show = show && mob;
+    if (el.classList.contains('desktop-only')) show = show && !mob;
+    if (el.classList.contains('advanced-only')) show = show && adv;
+    return show;
+  }
+
+  table.querySelectorAll('thead th, tbody td').forEach((cell) => {
+    cell.style.display = shouldShow(cell) ? 'table-cell' : 'none';
+  });
+
+  // If tbody currently has a single status row with colspan, keep it spanning the visible columns.
+  const firstRow = tbody.querySelector('tr');
+  if (firstRow && firstRow.children && firstRow.children.length === 1) {
+    const onlyCell = firstRow.children[0];
+    if (onlyCell && onlyCell.hasAttribute('colspan')) {
+      const ths = Array.from(table.querySelectorAll('thead th'));
+      let visibleCount = 0;
+      for (const th of ths) if (shouldShow(th)) visibleCount++;
+      if (visibleCount > 0) onlyCell.colSpan = visibleCount;
+    }
+  }
+}
 
   function parseHorizonFileText(text, filename = "horizon file"){
     const pts = [];
@@ -1000,6 +1039,7 @@ async function applyUrlStateFromQuery(){
     // force a re-render so columns appear/disappear
     SNR_CACHE.clear();
     refreshTableOnly();
+    applyObjectsTableColumnVisibility();
     updateObjectsStatus();
     updateCaption();
     updateMobileChartInfo();
@@ -1082,6 +1122,7 @@ async function applyUrlStateFromQuery(){
 
     // Refresh the table so the SNR column updates instantly
     refreshTableOnly();
+    applyObjectsTableColumnVisibility();
     updateObjectsStatus();
   }
 
@@ -2581,6 +2622,7 @@ async function applyUrlStateFromQuery(){
       tbody.appendChild(tr);
     }
 
+    applyObjectsTableColumnVisibility();
     setHeaderArrows();
   }
 
@@ -2590,6 +2632,7 @@ async function applyUrlStateFromQuery(){
 
     if (FILTERED_INDICES.length === 0) {
       $("objectsTbody").innerHTML = `<tr><td colspan="10" class="muted" style="padding:12px;">No objects match your filters.</td></tr>`;
+      applyObjectsTableColumnVisibility();
       setHeaderArrows();
       selectedObjectIdx = null;
       if (viewMode === "night") drawNightChart();
@@ -2623,6 +2666,7 @@ async function applyUrlStateFromQuery(){
 
     $("objectsStatus").textContent = "⏳ Calculating visibility…";
     $("objectsTbody").innerHTML = `<tr><td colspan="10" class="muted" style="padding:12px;">Calculating…</td></tr>`;
+    applyObjectsTableColumnVisibility();
 
     await new Promise(r => setTimeout(r, 0));
 
