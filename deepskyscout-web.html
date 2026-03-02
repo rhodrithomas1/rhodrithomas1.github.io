@@ -124,24 +124,24 @@
 <option value="9">9 (inner city)</option>
 </select>
 </div>
-<div class="form-row" id="snrBroadbandRow">
-<label for="snrBroadbandSelect">RGB filter (galaxies / clusters)</label>
-<select id="snrBroadbandSelect">
-<option value="B">Blue (B)</option>
-<option selected="" value="V">Green (V)</option>
-<option value="R">Red (R)</option>
+<div class="form-row" id="snrRow">
+<label for="snrModeSelect">SNR mode</label>
+<select id="snrModeSelect">
+<option selected="" value="auto">Auto (recommended)</option>
+<option value="broadband">Broadband</option>
+<option value="narrowband">Narrowband (Ha/OIII/SII)</option>
 </select>
 </div>
-<div class="form-row" id="snrNebulaRow">
-<label for="snrNebulaBandpassSelect">Nebula filter (Hα)</label>
-<select id="snrNebulaBandpassSelect">
-<option selected="" value="20">20 nm (Smart Scopes)</option>
-<option value="9">9 nm</option>
-<option value="6">6 nm</option>
-<option value="3">3 nm</option>
+<div class="form-row" id="snrControls" style="display:none;">
+<label for="snrLineSelect">Narrowband line</label>
+<select id="snrLineSelect">
+<option selected="" value="Halpha">Hα</option>
+<option value="OIII">OIII</option>
+<option value="SII">SII</option>
 </select>
 </div>
 </div>
+
 </div>
 </div>
 </div>
@@ -241,8 +241,8 @@
 
 <th class="advanced-only mobile-only" data-key="snr" style="min-width:90px;">SNR <span class="arrow" id="arrow-snr-m"></span></th>
 <th class="desktop-only" data-key="common_name" style="min-width:160px;">Common Name <span class="arrow" id="arrow-common_name"></span></th>
-<th class="advanced-only desktop-only" data-key="magnitude" style="min-width:90px;">Mag <span class="arrow" id="arrow-magnitude"></span></th>
-<th class="advanced-only desktop-only" data-key="size" style="min-width:120px;">Size <span class="arrow" id="arrow-size"></span></th>
+<th data-key="magnitude" style="min-width:90px;">Mag <span class="arrow" id="arrow-magnitude"></span></th>
+<th data-key="size" style="min-width:120px;">Size <span class="arrow" id="arrow-size"></span></th>
 <th data-key="type" style="min-width:120px;">Type <span class="arrow" id="arrow-type"></span></th>
 <th class="desktop-only" data-key="subtype" style="min-width:160px;">Subtype <span class="arrow" id="arrow-subtype"></span></th>
 <!-- ✅ Desktop-only visibility (last column on desktop) -->
