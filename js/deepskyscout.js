@@ -4,6 +4,61 @@
 (() => {
   const $ = (id) => document.getElementById(id);
 
+  // Normalize top nav order so it is consistent across pages:
+  // Home, Astro Photos, DeepSkyScout, How it works
+  try {
+    const nav = document.querySelector('nav');
+    if (nav) {
+      const desired = [
+        { href: 'index.html', text: 'Home' },
+        { href: 'astro.html', text: 'Astro Photos' },
+        { href: 'deepskyscout-web.html', text: 'DeepSkyScout' },
+        { href: 'how-it-works.html', text: 'How it works' },
+      ];
+
+      const norm = (href) => (href || '').split('#')[0].split('?')[0].trim();
+      const existing = Array.from(nav.querySelectorAll('a'));
+      const activeHref = (() => {
+        const a = existing.find(x => x.classList.contains('active'));
+        return a ? norm(a.getAttribute('href')) : null;
+      })();
+
+      const map = new Map();
+      for (const a of existing) {
+        const h = norm(a.getAttribute('href'));
+        if (!map.has(h)) map.set(h, a);
+      }
+
+      // Pull the core links out (so we can re-append them in the desired order)
+      for (const d of desired) {
+        const a = map.get(d.href);
+        if (a && a.parentNode === nav) nav.removeChild(a);
+      }
+
+      for (const d of desired) {
+        let a = map.get(d.href);
+        if (!a) {
+          a = document.createElement('a');
+          a.href = d.href;
+          a.textContent = d.text;
+        } else {
+          a.textContent = d.text;
+        }
+        if (activeHref && activeHref === d.href) a.classList.add('active');
+        nav.appendChild(a);
+      }
+
+      // Re-append any other links afterwards, preserving original order
+      for (const a of existing) {
+        const h = norm(a.getAttribute('href'));
+        if (!desired.some(d => d.href === h) && a.parentNode !== nav) {
+          nav.appendChild(a);
+        }
+      }
+    }
+  } catch (e) { /* ignore */ }
+
+
   const RAD = Math.PI / 180;
   const DEG = 180 / Math.PI;
 
@@ -1113,6 +1168,124 @@ async function applyUrlStateFromQuery(){
   const SNR_CACHE = new Map();
   const SNR_SCORE_CAP = 10000;
 
+  // -----------------------------
+  // Moonlight penalty for SNR (sky background boost)
+  // -----------------------------
+  // We model moonlight as an *additional* sky background component (photons/s/m^2/arcsec^2)
+  // that depends on:
+  //  - lunar illumination (phase)
+  //  - lunar altitude
+  //  - angular separation between Moon and target
+  // and is averaged across the times the target is above your (custom) horizon during the night.
+  //
+  // The penalty is applied much more strongly to broadband than narrowband.
+
+  const MOON_SNR_SENSITIVITY = { broadband: 1.0, narrowband: 0.25 };
+
+  function getMoonTrackSpanForCurrentNight(){
+    if (!NIGHT_WINDOW) return null;
+    let trackStart = NIGHT_WINDOW.startUtc.getTime();
+    let trackEnd = NIGHT_WINDOW.endUtc.getTime();
+    const minSpan = 24*3600000;
+    const span = trackEnd - trackStart;
+    if (span < minSpan) {
+      const extra = Math.floor((minSpan - span) / 2);
+      trackStart -= extra;
+      trackEnd += extra;
+    }
+    const stepMs = Math.max(1, VIS_STEP_MIN) * 60 * 1000;
+    return { trackStart, trackEnd, stepMs };
+  }
+
+  function moonDeltaSkyMag(illumFrac, sepDeg, moonAltDeg){
+    const illum = clamp(Number(illumFrac) || 0, 0, 1);
+    const sep = clamp(Number(sepDeg) || 180, 0.5, 180);
+    const alt = clamp(Number(moonAltDeg) || -90, -5, 90);
+    if (illum <= 0 || alt <= 0) return 0;
+
+    // Heuristic model: full Moon high in the sky can brighten the background by several mag/arcsec^2,
+    // and the effect increases strongly as the Moon approaches the target.
+    const bright = Math.pow(illum, 1.4);                 // phase weight
+    const altF = Math.pow(Math.sin(alt * RAD), 1.3);     // altitude weight
+
+    const near = 1 / (1 + Math.pow(sep / 30, 2));        // strong near-target scattering
+    const wide = 0.5 / (1 + Math.pow(sep / 90, 2));      // broad-field sky brightening
+
+    const base = 3.6; // mag/arcsec^2 boost at full Moon, high altitude, very close
+    const dm = base * bright * altF * (near + wide);
+    return clamp(dm, 0, 4.5);
+  }
+
+  function computeMoonExtraSkyFluxPerArcsec2AvgForObject(loc, o, lambdaNm, bandpassNm, mode){
+    try {
+      if (!loc || !o || !NIGHT_WINDOW) return 0;
+
+      const span = getMoonTrackSpanForCurrentNight();
+      if (!span) return 0;
+
+      const track = getMoonTrackForWindow(loc, span.trackStart, span.trackEnd, span.stepMs);
+      const illum = Number(track?.phase?.illumFrac) || 0;
+      if (illum < 0.01) return 0;
+
+      const raObj = parseRaDeg(o?.ra);
+      const decObj = parseDecDeg(o?.dec);
+      if (raObj == null || decObj == null) return 0;
+
+      const latDeg = Number(loc.latitude);
+      const lonDeg = Number(loc.longitude);
+      if (!Number.isFinite(latDeg) || !Number.isFinite(lonDeg)) return 0;
+
+      const darkSqm = (BORTLE_TO_SQM[1] ?? 21.99);
+      const darkFlux = sqmToSkyPhotonFluxPerArcsec2(darkSqm, lambdaNm, bandpassNm);
+      if (!(Number.isFinite(darkFlux) && darkFlux > 0)) return 0;
+
+      const sens = (mode === 'narrowband') ? MOON_SNR_SENSITIVITY.narrowband : MOON_SNR_SENSITIVITY.broadband;
+      const horizonFn = getHorizonAtAzFn();
+
+      let sumExtra = 0;
+      let sumT = 0;
+
+      const times = track?.times || [];
+      const pts = track?.pts || [];
+      const moonRa = track?.moonRa || [];
+      const moonDec = track?.moonDec || [];
+
+      for (let i = 0; i < times.length - 1; i++) {
+        const t0 = times[i];
+        const t1 = times[i+1];
+        const dt = (t1 - t0) / 1000;
+        if (!(dt > 0)) continue;
+
+        const tMid = (t0 + t1) / 2;
+        if (isDayMs(tMid)) continue;
+
+        // Only count when the target itself is above the selected horizon
+        const aaObj = raDecToAltAz(new Date(tMid), raObj, decObj, latDeg, lonDeg);
+        const hz = horizonFn(aaObj.azDeg);
+        if (aaObj.altDeg < hz) continue;
+
+        const moonAlt = ((pts[i]?.altDeg ?? -90) + (pts[i+1]?.altDeg ?? -90)) * 0.5;
+        if (moonAlt <= 0) continue; // Moon below horizon
+
+        const sep = angularSeparationDeg(raObj, decObj, moonRa[i], moonDec[i]);
+        const dm = moonDeltaSkyMag(illum, sep, moonAlt) * sens;
+        if (!(dm > 0)) continue;
+
+        const mul = Math.pow(10, 0.4 * dm);
+        const extra = darkFlux * (mul - 1);
+        if (!(Number.isFinite(extra) && extra > 0)) continue;
+
+        sumExtra += extra * dt;
+        sumT += dt;
+      }
+
+      return (sumT > 0) ? (sumExtra / sumT) : 0;
+    } catch (e) {
+      console.warn('Moon sky penalty error:', e);
+      return 0;
+    }
+  }
+
   function computeSNRScoreForIdx(idx){
     if (!isAdvancedModeEnabled()) return null;
 
@@ -1150,6 +1323,13 @@ async function applyUrlStateFromQuery(){
       nebulaBandpassNm,
       bortle,
       sqm,
+      dateIso: SELECTED_DATE_ISO || '',
+      locLat: Number(getCurrentLocation()?.latitude) || 0,
+      locLon: Number(getCurrentLocation()?.longitude) || 0,
+      horizonMode: HORIZON_MODE || '',
+      horizonFloor: getHorizonFloorDeg(),
+      horizonName: HORIZON_PROFILE?.name || '',
+      moonSpan: (getMoonTrackSpanForCurrentNight()?.trackStart || 0) + ',' + (getMoonTrackSpanForCurrentNight()?.trackEnd || 0),
       scope: scope?.name || '',
       d: Number(scope?.aperture_mm) || 0,
       f: Number(scope?.focal_mm) || 0,
@@ -1217,7 +1397,10 @@ async function applyUrlStateFromQuery(){
     const apAreaArcsec2 = pixAreaArcsec2 * AP_PX;
 
     const S_surf = S_phot_per_s_m2 / Math.max(1, objArea); // photons/s/m2/arcsec2
-    const B_surf = sky_phot_per_s_m2_arcsec2;             // photons/s/m2/arcsec2
+    // Add moonlight as an extra sky background component (averaged over target-visible night time)
+    const loc = getCurrentLocation();
+    const moonExtra = computeMoonExtraSkyFluxPerArcsec2AvgForObject(loc, o, lambdaNm, bandpassNm, mode);
+    const B_surf = sky_phot_per_s_m2_arcsec2 + (Number.isFinite(moonExtra) ? moonExtra : 0);             // photons/s/m2/arcsec2
 
     // Apply extinction/transmission to signal, and airmass scaling to sky
     const S = S_surf * apAreaArcsec2 * A * eff * t * trans;
@@ -1738,6 +1921,212 @@ async function applyUrlStateFromQuery(){
 
     return { altDeg, azDeg };
   }
+
+  // -----------------------------
+  // Moon (phase, position, separation)
+  // -----------------------------
+  function sinDeg(x){ return Math.sin(x*RAD); }
+  function cosDeg(x){ return Math.cos(x*RAD); }
+
+  function eclToEqRaDec(lonDeg, latDeg, epsDeg){
+    const lon = lonDeg * RAD;
+    const lat = latDeg * RAD;
+    const eps = epsDeg * RAD;
+
+    const x = Math.cos(lon) * Math.cos(lat);
+    const y = Math.sin(lon) * Math.cos(lat);
+    const z = Math.sin(lat);
+
+    const xeq = x;
+    const yeq = y * Math.cos(eps) - z * Math.sin(eps);
+    const zeq = y * Math.sin(eps) + z * Math.cos(eps);
+
+    let ra = Math.atan2(yeq, xeq) * DEG;
+    if (ra < 0) ra += 360;
+    const dec = Math.asin(Math.max(-1, Math.min(1, zeq))) * DEG;
+    return { raDeg: ra, decDeg: dec };
+  }
+
+  function sunEclipticLonDegFromJd(jd){
+    const d = jd - 2451545.0;
+    const g = clamp360(357.529 + 0.98560028 * d); // mean anomaly
+    const q = clamp360(280.459 + 0.98564736 * d); // mean longitude
+    const L = clamp360(q + 1.915 * sinDeg(g) + 0.020 * sinDeg(2*g));
+    return L;
+  }
+
+  function moonEclipticLonLatDegFromJd(jd){
+    // Low-precision Moon position (good enough for planning / separation warnings)
+    const d = jd - 2451545.0;
+
+    const L = clamp360(218.316 + 13.176396 * d);   // mean longitude
+    const M = clamp360(134.963 + 13.064993 * d);   // mean anomaly
+    const F = clamp360(93.272  + 13.229350 * d);   // mean distance
+    const D = clamp360(297.850 + 12.190749 * d);   // elongation
+
+    let lon = L;
+    lon += 6.289 * sinDeg(M);
+    lon += 1.274 * sinDeg(2*D - M);
+    lon += 0.658 * sinDeg(2*D);
+    lon += 0.214 * sinDeg(2*M);
+    lon += 0.110 * sinDeg(D);
+
+    let lat = 0;
+    lat += 5.128 * sinDeg(F);
+    lat += 0.280 * sinDeg(M + F);
+    lat += 0.277 * sinDeg(M - F);
+    lat += 0.173 * sinDeg(2*D - F);
+    lat += 0.055 * sinDeg(2*D + F - M);
+    lat += 0.046 * sinDeg(2*D - F - M);
+    lat += 0.033 * sinDeg(2*D + F);
+    lat += 0.017 * sinDeg(2*M + F);
+
+    return { lonDeg: clamp360(lon), latDeg: lat };
+  }
+
+  function moonRaDecFromUtcDate(utcDate){
+    const jd = jdFromDate(utcDate);
+    const d = jd - 2451545.0;
+    const eps = 23.439 - 0.0000004 * d;
+    const ecl = moonEclipticLonLatDegFromJd(jd);
+    const eq = eclToEqRaDec(ecl.lonDeg, ecl.latDeg, eps);
+    return { ...eq, lonDeg: ecl.lonDeg, latDeg: ecl.latDeg, epsDeg: eps };
+  }
+
+  function moonPhaseInfoFromUtcDate(utcDate){
+    const jd = jdFromDate(utcDate);
+    const d = jd - 2451545.0;
+    const eps = 23.439 - 0.0000004 * d;
+
+    const sunLon = sunEclipticLonDegFromJd(jd);
+    const moonEcl = moonEclipticLonLatDegFromJd(jd);
+
+    // Elongation (Moon - Sun)
+    let elong = clamp360(moonEcl.lonDeg - sunLon);
+    if (elong > 180) elong = 360 - elong;
+
+    const illum = (1 - Math.cos(elong * RAD)) / 2; // 0..1
+
+    // Waxing/waning: compare true ecliptic longitudes
+    const waxing = clamp360(moonEcl.lonDeg - sunLon) < 180;
+
+    const pct = Math.round(illum * 100);
+    let name = "";
+    if (pct <= 2) name = "New";
+    else if (pct < 48) name = waxing ? "Waxing crescent" : "Waning crescent";
+    else if (pct <= 52) name = waxing ? "First quarter" : "Last quarter";
+    else if (pct < 98) name = waxing ? "Waxing gibbous" : "Waning gibbous";
+    else name = "Full";
+
+    return { illumFrac: illum, illumPct: pct, waxing, name, elongDeg: elong, epsDeg: eps };
+  }
+
+  function angularSeparationDeg(ra1Deg, dec1Deg, ra2Deg, dec2Deg){
+    const ra1 = ra1Deg * RAD, ra2 = ra2Deg * RAD;
+    const d1 = dec1Deg * RAD, d2 = dec2Deg * RAD;
+
+    const s = Math.sin(d1)*Math.sin(d2) + Math.cos(d1)*Math.cos(d2)*Math.cos(ra1 - ra2);
+    const c = Math.max(-1, Math.min(1, s));
+    return Math.acos(c) * DEG;
+  }
+
+  let MOON_TRACK_CACHE = { key: null, pts: null, phase: null, times: null, moonRa: null, moonDec: null };
+
+  function getMoonTrackForWindow(loc, trackStartMs, trackEndMs, stepMs){
+    const latDeg = Number(loc.latitude);
+    const lonDeg = Number(loc.longitude);
+    const key = `${latDeg.toFixed(5)},${lonDeg.toFixed(5)}|${trackStartMs}|${trackEndMs}|${stepMs}`;
+
+    if (MOON_TRACK_CACHE.key === key && MOON_TRACK_CACHE.pts) return MOON_TRACK_CACHE;
+
+    const pts = [];
+    const times = [];
+    const moonRa = [];
+    const moonDec = [];
+
+    for (let t = trackStartMs; t <= trackEndMs; t += stepMs) {
+      const dt = new Date(t);
+      const m = moonRaDecFromUtcDate(dt);
+      const aa = raDecToAltAz(dt, m.raDeg, m.decDeg, latDeg, lonDeg);
+      pts.push({ t, altDeg: aa.altDeg, azDeg: aa.azDeg });
+      times.push(t);
+      moonRa.push(m.raDeg);
+      moonDec.push(m.decDeg);
+    }
+
+    if (pts.length === 0 || pts[pts.length-1].t !== trackEndMs) {
+      const dt = new Date(trackEndMs);
+      const m = moonRaDecFromUtcDate(dt);
+      const aa = raDecToAltAz(dt, m.raDeg, m.decDeg, latDeg, lonDeg);
+      pts.push({ t: trackEndMs, altDeg: aa.altDeg, azDeg: aa.azDeg });
+      times.push(trackEndMs);
+      moonRa.push(m.raDeg);
+      moonDec.push(m.decDeg);
+    }
+
+    const mid = new Date((trackStartMs + trackEndMs) / 2);
+    const phase = moonPhaseInfoFromUtcDate(mid);
+
+    MOON_TRACK_CACHE = { key, pts, phase, times, moonRa, moonDec };
+    return MOON_TRACK_CACHE;
+  }
+
+  function computeMoonSeparationTonight(loc, objRaDeg, objDecDeg, vis){
+    if (!loc || !NIGHT_WINDOW || objRaDeg == null || objDecDeg == null) return null;
+
+    const sunsetMs = NIGHT_WINDOW.startUtc.getTime();
+    const sunriseMs = NIGHT_WINDOW.endUtc.getTime();
+    const stepMs = Math.max(1, VIS_STEP_MIN) * 60 * 1000;
+
+    // Match the same extended span logic used in drawNightChart
+    let trackStart = sunsetMs;
+    let trackEnd = sunriseMs;
+    const minSpan = 24*3600000;
+    const span = trackEnd - trackStart;
+    if (span < minSpan) {
+      const extra = Math.floor((minSpan - span) / 2);
+      trackStart -= extra;
+      trackEnd += extra;
+    }
+
+    const track = getMoonTrackForWindow(loc, trackStart, trackEnd, stepMs);
+
+    let minSep = null;
+    let minT = null;
+
+    for (let i = 0; i < track.times.length; i++) {
+      const sep = angularSeparationDeg(objRaDeg, objDecDeg, track.moonRa[i], track.moonDec[i]);
+      if (minSep == null || sep < minSep) { minSep = sep; minT = track.times[i]; }
+    }
+
+    // Separation at the midpoint of best window (if available)
+    let bestSep = null;
+    let bestT = null;
+    if (vis?.bestStartUtcMs != null && vis?.bestEndUtcMs != null) {
+      bestT = Math.round((vis.bestStartUtcMs + vis.bestEndUtcMs) / 2);
+      // Find nearest sample
+      let jBest = 0;
+      let bestDt = Infinity;
+      for (let i = 0; i < track.times.length; i++) {
+        const dt = Math.abs(track.times[i] - bestT);
+        if (dt < bestDt) { bestDt = dt; jBest = i; }
+      }
+      bestSep = angularSeparationDeg(objRaDeg, objDecDeg, track.moonRa[jBest], track.moonDec[jBest]);
+    }
+
+    const tz = NIGHT_WINDOW?.tz || loc?.timezone || "UTC";
+    const minTimeTxt = (minT != null) ? formatLocalHM(new Date(minT), tz) : null;
+    const bestTimeTxt = (bestT != null) ? formatLocalHM(new Date(bestT), tz) : null;
+
+    return {
+      phase: track.phase,
+      minSepDeg: minSep,
+      minTimeTxt,
+      bestSepDeg: bestSep,
+      bestTimeTxt
+    };
+  }
+
 
   // Standalone horizon: uses ONLY numeric floor OR ONLY custom profile (no stacking)
   function computeVisibilityForObjectInWindow(location, horizonAtAzFn, raDeg, decDeg, startUtc, endUtc){
@@ -2281,7 +2670,16 @@ async function applyUrlStateFromQuery(){
 
     const maxAlt = (vis && vis.maxAltDeg != null) ? vis.maxAltDeg : null;
 
-    return { tz, visH, sunsetSunrise, bestWindow, maxAlt };
+    const obj = getSelectedObjectSafe();
+
+    let moon = null;
+    if (obj) {
+      const raDeg = parseRaDeg(obj.ra);
+      const decDeg = parseDecDeg(obj.dec);
+      moon = computeMoonSeparationTonight(loc, raDeg, decDeg, vis);
+    }
+
+    return { tz, visH, sunsetSunrise, bestWindow, maxAlt, moon };
   }
 
   function updateMobileChartInfo(){
@@ -2299,6 +2697,8 @@ async function applyUrlStateFromQuery(){
     }
 
     const d = buildTonightData(loc);
+
+
       const magTxt = formatObjectMagnitude(obj);
       const magHtml = (magTxt !== "—") ? `&nbsp;•&nbsp; Mag: <code>${magTxt}</code>` : "";
 
@@ -2311,13 +2711,19 @@ async function applyUrlStateFromQuery(){
       const snrHtml = adv
         ? `&nbsp;•&nbsp; SNR score: <code>${formatSNRScore(computeSNRScoreForIdx(selectedObjectIdx))}</code> <span class="muted">(Bortle ${getBortleValue()})</span>`
         : "";
+
+      const moon = d.moon;
+      const moonHtml = (moon && moon.phase)
+        ? `&nbsp;•&nbsp; Moon: <code>${moon.phase.illumPct}%</code> ${moon.phase.name}${(moon.minSepDeg!=null && moon.minTimeTxt) ? `&nbsp;•&nbsp; Closest: <code>${moon.minSepDeg.toFixed(0)}°</code> <span class="muted">@ ${moon.minTimeTxt}</span>` : ``}`
+        : ``;
+
 box.innerHTML = `
       <div class="t1">${safe(getObjectDisplayNamePlain(obj))}</div>
       <div class="t2">
         Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
         &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
         &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
-        ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}${magHtml}${lineHtml}${snrHtml}
+        ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}${magHtml}${lineHtml}${snrHtml}${moonHtml}
       </div>
     `;
     box.style.display = "";
@@ -2381,13 +2787,19 @@ box.innerHTML = `
       // Desktop: restore full info underneath the chart
       const d = buildTonightData(loc);
 
+      const moon = d.moon;
+      const moonHtml = (moon && moon.phase)
+        ? `&nbsp;•&nbsp; Moon: <code>${moon.phase.illumPct}%</code> ${moon.phase.name}${(moon.minSepDeg!=null && moon.minTimeTxt) ? `&nbsp;•&nbsp; Closest: <code>${moon.minSepDeg.toFixed(0)}°</code> <span class=\"muted\">@ ${moon.minTimeTxt}</span>` : ``}`
+        : ``;
+
+
       cap.innerHTML = `
         <div><strong>Tonight’s Visibility</strong> • ${nameLine}</div>
         <div style="margin-top:4px;">
           Sunset–Sunrise: <code>${safe(d.sunsetSunrise)}</code>
           &nbsp;•&nbsp; Total: <code>${d.visH.toFixed(2)}h</code>
           &nbsp;•&nbsp; Best window: <code>${safe(d.bestWindow)}</code>
-          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}${magHtml}${lineHtml}${snrHtml}
+          ${d.maxAlt != null ? `&nbsp;•&nbsp; Max altitude: <code>${d.maxAlt.toFixed(1)}°</code>` : ""}${magHtml}${lineHtml}${snrHtml}${moonHtml}
         </div>
       `;
       return;
@@ -2630,6 +3042,50 @@ box.innerHTML = `
     ctx.setLineDash([]);
   }
 
+  // Simple moon phase icon using two circles:
+  // - draw a white disk
+  // - clip to that disk
+  // - draw a black disk offset by illumination fraction
+  // This shows the shadowed portion as the overlap of the black disk.
+  function drawMoonPhaseIconOnCanvas(ctx, x, y, r, phase) {
+    if (!phase || !Number.isFinite(phase.illumFrac)) return;
+    const f = clamp(Number(phase.illumFrac), 0, 1);
+    const waxing = !!phase.waxing;
+
+    // Base (lit) disk
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.fill();
+
+    // Clip to the base disk so only the overlap is visible
+    ctx.clip();
+
+    // Shadow disk: at new moon (f=0) it's centered => fully dark.
+    // At full moon (f=1) it's shifted by ~2r => no overlap => fully lit.
+    const eps = 0.6;
+    const d = f * 2 * r + eps;
+    const sign = waxing ? -1 : 1; // UK: waxing lit on right, waning lit on left
+    ctx.beginPath();
+    ctx.arc(x + sign * d, y, r, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(0,0,0,0.92)";
+    ctx.fill();
+    ctx.restore();
+
+    // Outline
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawNightChart() {
     if (viewMode !== "night") return;
 
@@ -2677,6 +3133,77 @@ box.innerHTML = `
     // Horizon visualisation
     if (HORIZON_MODE === "custom" && HORIZON_PROFILE) drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
     else drawNumericHorizonCircle(ctx, cx, cy, radiusMax, getHorizonFloorDeg());
+
+    let moonPhaseForIcon = null;
+
+
+    // Moon track (always show, for context + separation)
+    {
+      const sunsetMs = NIGHT_WINDOW.startUtc.getTime();
+      const sunriseMs = NIGHT_WINDOW.endUtc.getTime();
+
+      let trackStart = sunsetMs;
+      let trackEnd = sunriseMs;
+      const minSpan = 24*3600000;
+      const span = trackEnd - trackStart;
+
+      if (span < minSpan) {
+        const extra = Math.floor((minSpan - span) / 2);
+        trackStart -= extra;
+        trackEnd += extra;
+      }
+
+      const stepMsMoon = Math.max(1, VIS_STEP_MIN) * 60 * 1000;
+      const moonTrack = getMoonTrackForWindow(loc, trackStart, trackEnd, stepMsMoon);
+      moonPhaseForIcon = moonTrack.phase;
+
+      // Draw dashed path above horizon
+      ctx.save();
+      ctx.setLineDash([7, 6]);
+      ctx.lineWidth = 2.2;
+
+      function strokeMoonSeg(p0, p1){
+        const a0 = projectAltAz(p0.altDeg, p0.azDeg, cx, cy, radiusMax);
+        const a1 = projectAltAz(p1.altDeg, p1.azDeg, cx, cy, radiusMax);
+        ctx.beginPath();
+        ctx.moveTo(a0.x, a0.y);
+        ctx.lineTo(a1.x, a1.y);
+        ctx.stroke();
+      }
+
+      for (let i = 1; i < moonTrack.pts.length; i++) {
+        const A = moonTrack.pts[i-1];
+        const B = moonTrack.pts[i];
+        const midT = (A.t + B.t) / 2;
+        const mid = { altDeg: (A.altDeg + B.altDeg) / 2, azDeg: (A.azDeg + B.azDeg) / 2 };
+        const hMid = horizonAtAzFn(mid.azDeg);
+        if (mid.altDeg < hMid) continue;
+
+        const day = isDayMs(midT);
+        ctx.strokeStyle = day ? "rgba(230,230,230,0.28)" : "rgba(245,245,245,0.55)";
+        strokeMoonSeg(A, B);
+      }
+
+      // Current position marker
+      {
+        const now = Date.now();
+        const mm = moonRaDecFromUtcDate(new Date(now));
+        const latDegMoon = Number(loc.latitude);
+        const lonDegMoon = Number(loc.longitude);
+        const aa = raDecToAltAz(new Date(now), mm.raDeg, mm.decDeg, latDegMoon, lonDegMoon);
+        const hNow = horizonAtAzFn(aa.azDeg);
+        if (aa.altDeg >= hNow) {
+          const xy = projectAltAz(aa.altDeg, aa.azDeg, cx, cy, radiusMax);
+          ctx.setLineDash([]);
+          ctx.fillStyle = "rgba(250,250,250,0.95)";
+          ctx.beginPath();
+          ctx.arc(xy.x, xy.y, 5.5, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
 
     const sunsetMs = NIGHT_WINDOW.startUtc.getTime();
     const sunriseMs = NIGHT_WINDOW.endUtc.getTime();
@@ -2731,6 +3258,177 @@ box.innerHTML = `
       strokeSegment(A, B, col);
     }
 
+    // Night event times: sunset/sunrise, horizon rise/set (custom horizon), meridian (max altitude)
+    {
+      const tz = NIGHT_WINDOW.tz || "UTC";
+      const nightStartMs = NIGHT_WINDOW.startUtc.getTime();
+      const nightEndMs   = NIGHT_WINDOW.endUtc.getTime();
+
+      // Build points inside the real night window (even if we expanded the drawn span)
+      const nightPts = [];
+      const pushPt = (tMs) => {
+        const aa = raDecToAltAz(new Date(tMs), raDeg, decDeg, latDeg, lonDeg);
+        nightPts.push({ t: tMs, altDeg: aa.altDeg, azDeg: aa.azDeg });
+      };
+
+      pushPt(nightStartMs);
+      for (const p of pts) {
+        if (p.t > nightStartMs && p.t < nightEndMs) nightPts.push(p);
+      }
+      pushPt(nightEndMs);
+      nightPts.sort((a,b)=>a.t-b.t);
+
+      let riseMs = null;
+      let setMs = null;
+
+      // Meridian ~= max altitude time during the night window
+      let meridianMs = null;
+      let maxAlt = -1e9;
+      for (const p of nightPts) {
+        if (p.altDeg > maxAlt) { maxAlt = p.altDeg; meridianMs = p.t; }
+      }
+
+      // Horizon crossings (custom horizon profile)
+      // Only show "Horizon rise/set" if the object actually crosses your horizon during the night window.
+      // If it stays above all night (or stays below all night), omit these labels.
+      let anyAbove = false;
+      let anyBelow = false;
+
+      for (let i = 0; i < nightPts.length - 1; i++) {
+        const A = nightPts[i];
+        const B = nightPts[i+1];
+        const d0 = A.altDeg - horizonAtAzFn(A.azDeg);
+        const d1 = B.altDeg - horizonAtAzFn(B.azDeg);
+
+        if (d0 >= 0 || d1 >= 0) anyAbove = true;
+        if (d0 < 0 || d1 < 0)  anyBelow = true;
+
+        if (d0 < 0 && d1 >= 0) {
+          const denom = (d0 - d1);
+          let u = (denom === 0) ? 0.5 : (d0 / denom);
+          u = clamp(u, 0, 1);
+          const tCross = A.t + u * (B.t - A.t);
+          if (riseMs == null || tCross < riseMs) riseMs = tCross;
+        } else if (d0 >= 0 && d1 < 0) {
+          const denom = (d0 - d1);
+          let u = (denom === 0) ? 0.5 : (d0 / denom);
+          u = clamp(u, 0, 1);
+          const tCross = A.t + u * (B.t - A.t);
+          if (setMs == null || tCross > setMs) setMs = tCross;
+        }
+      }
+
+      // No crossings -> no rise/set shown
+      if (!(anyAbove && anyBelow)) {
+        riseMs = null;
+        setMs = null;
+      }
+
+      const fmt = (tMs) => (tMs == null) ? "—" : formatLocalHM(new Date(tMs), tz);
+
+      // Marker/label colors (used in chart + overlay)
+      const COL_SUN = "rgba(255, 215, 0, 0.95)";     // yellow
+      const COL_HZN = "rgba(80, 220, 140, 0.95)";    // green
+      const COL_MER = "rgba(220, 80, 220, 0.95)";    // magenta
+
+      // Text overlay (top-left)
+      ctx.save();
+      ctx.font = "13px ui-sans-serif, system-ui";
+
+      const WHITE = "rgba(255,255,255,0.95)";
+      const line1Seg = [
+        { text: "Sunset ", color: COL_SUN },
+        { text: fmt(nightStartMs), color: WHITE },
+        { text: "  •  ", color: WHITE },
+        { text: "Sunrise ", color: COL_SUN },
+        { text: fmt(nightEndMs), color: WHITE },
+      ];
+
+      const line2Seg = [];
+      if (riseMs != null) {
+        line2Seg.push({ text: "Horizon rise ", color: COL_HZN });
+        line2Seg.push({ text: fmt(riseMs), color: WHITE });
+        line2Seg.push({ text: "  •  ", color: WHITE });
+      }
+      line2Seg.push({ text: "Meridian ", color: COL_MER });
+      line2Seg.push({ text: fmt(meridianMs), color: WHITE });
+      if (setMs != null) {
+        line2Seg.push({ text: "  •  ", color: WHITE });
+        line2Seg.push({ text: "Horizon set ", color: COL_HZN });
+        line2Seg.push({ text: fmt(setMs), color: WHITE });
+      }
+
+      const line1 = line1Seg.map(s => s.text).join("");
+      const line2 = line2Seg.map(s => s.text).join("");
+
+      const padX = 10, padY = 8;
+      const tw1 = ctx.measureText(line1).width;
+      const tw2 = ctx.measureText(line2).width;
+      const boxW = Math.max(tw1, tw2) + padX * 2;
+      const boxH = 44;
+
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(12, 12, boxW, boxH);
+
+      const drawSegLine = (x, y, segs) => {
+        let cx = x;
+        for (const s of segs) {
+          ctx.fillStyle = s.color || WHITE;
+          ctx.fillText(s.text, cx, y);
+          cx += ctx.measureText(s.text).width;
+        }
+      };
+
+      drawSegLine(12 + padX, 12 + padY + 12, line1Seg);
+      drawSegLine(12 + padX, 12 + padY + 28, line2Seg);
+      ctx.restore();
+
+
+      // Marker helper (draw a labelled marker on the object track)
+      // Sunset/Sunrise are shown if the object is above 0° altitude at that moment.
+      // Horizon rise/set + meridian are shown only if the object is above your selected horizon at that moment.
+      const drawMarker = (tMs, label, fillStyle, textStyle, requireAboveHorizon) => {
+        if (tMs == null) return;
+
+        const aa = raDecToAltAz(new Date(tMs), raDeg, decDeg, latDeg, lonDeg);
+        const hz = horizonAtAzFn(aa.azDeg);
+
+        if (requireAboveHorizon) {
+          if (aa.altDeg < hz) return;
+        } else {
+          if (aa.altDeg < 0) return;
+        }
+
+        const xy = projectAltAz(aa.altDeg, aa.azDeg, cx, cy, radiusMax);
+
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(0,0,0,0.70)";
+        ctx.fillStyle = fillStyle;
+
+        const r = 8;
+        ctx.beginPath();
+        ctx.arc(xy.x, xy.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = "11px ui-sans-serif, system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = textStyle;
+        ctx.fillText(label, xy.x, xy.y + 0.5);
+        ctx.restore();
+      };
+      // Sunset / Sunrise markers (yellow)
+      drawMarker(nightStartMs, "SS", COL_SUN, "rgba(0,0,0,0.92)", false);
+      drawMarker(nightEndMs,   "SR", COL_SUN, "rgba(0,0,0,0.92)", false);
+
+      // Horizon rise / set (green triangles) and meridian (magenta)
+      drawMarker(riseMs,     "▲", COL_HZN, "rgba(0,0,0,0.92)", true);
+      drawMarker(meridianMs, "M", COL_MER, "rgba(255,255,255,0.95)", true);
+      drawMarker(setMs,      "▼", COL_HZN, "rgba(0,0,0,0.92)", true);
+}
+
     // current position marker (only if above horizon)
     {
       const now = Date.now();
@@ -2745,6 +3443,12 @@ box.innerHTML = `
         ctx.arc(xy.x, xy.y, 7, 0, Math.PI*2);
         ctx.stroke();
       }
+    }
+
+    // Moon phase icon (top-right)
+    {
+      const rMoon = clamp(Math.floor(Math.min(w, h) * 0.05), 14, 20);
+      drawMoonPhaseIconOnCanvas(ctx, w - 12 - rMoon, 12 + rMoon, rMoon, moonPhaseForIcon);
     }
   }
 
