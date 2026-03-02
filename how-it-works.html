@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepSkyScout – How It Works</title>
+
+  <!-- Base site styles -->
+  <link rel="stylesheet" href="css/styles.css" />
+  <!-- Reuse DeepSkyScout styling for cards/typography -->
+  <link rel="stylesheet" href="css/deepskyscout.css" />
+  <style>
+    /* Light page-specific tweaks (keeps your main CSS untouched) */
+    .toc a { text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .how-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+    @media (min-width: 900px) { .how-grid { grid-template-columns: 1fr 1fr; } }
+    code.k { padding: 0.15em 0.35em; border-radius: 6px; background: rgba(255,255,255,0.06); }
+    .note { color: rgba(255,255,255,0.78); }
+    .small { font-size: 0.95rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    ul.tight li { margin: 0.25rem 0; }
+    .pill-inline { display:inline-block; padding:0.12rem 0.5rem; border-radius:999px; background: rgba(255,255,255,0.08); }
+  </style>
+
+  <!-- MathJax for equations -->
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\(', '\)'], ['\(', '\)']],
+        displayMath: [['\[
+', '
+\]'], ['\[', '\]']]
+      }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+
+<body>
+  <nav>
+<a href="index.html">Home</a>
+<a href="astro.html">Astro Photos</a>
+<a href="deepskyscout-web.html">DeepSkyScout</a>
+<a class="active" href="how-it-works.html">How it works</a>
+</nav>
+
+  <section class="hero">
+    <h1>How DeepSkyScout Works</h1>
+    <p>What the controls do, what the charts show, and how the SNR ranking is estimated.</p>
+  </section>
+
+  <div class="container planner-container">
+    <div class="card">
+      <div class="card-head">
+        <div class="status">Quick start</div>
+      </div>
+      <div style="padding:12px;">
+        <ol class="tight">
+          <li><b>Pick your location</b> (or add your own).</li>
+          <li><b>Select telescope + reducer + camera</b> so the field-of-view and image scale are correct.</li>
+          <li><b>Set the horizon</b> (simple altitude, or load a custom horizon profile).</li>
+          <li>Use <b>Tonight’s Visibility</b> to see the sky track, then sort the table by <b>SNR</b> (Advanced mode).</li>
+          <li>Switch to <b>Sky Image (Aladin)</b> to check framing and the surrounding field.</li>
+        </ol>
+        <p class="note small">Tip: you can share a setup using the URL parameters (location/equipment/date/horizon). Opening the link restores the same planner state.</p>
+      </div>
+    </div>
+
+    <div class="card toc" style="margin-top:14px;">
+      <div class="card-head">
+        <div class="status">On this page</div>
+      </div>
+      <div style="padding:12px;">
+        <ul class="tight">
+          <li><a href="#inputs">Planner inputs</a></li>
+          <li><a href="#charts">Charts and views</a></li>
+          <li><a href="#table">The object table</a></li>
+          <li><a href="#snr">SNR ranking model</a></li>
+          <li><a href="#moon">Moon impact</a></li>
+          <li><a href="#assumptions">Assumptions & limitations</a></li>
+          <li><a href="#references">Sources & credits</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <h2 id="inputs" style="margin-top:20px;">Planner inputs</h2>
+
+    <div class="how-grid">
+      <div class="card">
+        <div class="card-head"><div class="status">Location + date</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li><b>Location</b> sets latitude/longitude for altitude/azimuth tracks.</li>
+            <li><b>Date</b> chooses the night window (Sunset → Sunrise for that date at your location).</li>
+            <li>The “Tonight’s Visibility” chart uses that window to compute when each object is above your chosen horizon.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Horizon</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li><b>Simple horizon</b>: use a fixed altitude like <span class="pill-inline">20°</span>.</li>
+            <li><b>Custom horizon</b>: load a <span class="mono">.hrz</span> profile so visibility respects local obstructions (trees/buildings/hills).</li>
+            <li>The planner only counts an object as “visible” when its altitude is above the horizon profile at that azimuth.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Equipment</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li><b>Telescope + reducer</b> sets focal length and aperture (light-gathering area).</li>
+            <li><b>Camera</b> sets sensor size and pixel size, which determines field-of-view and image scale.</li>
+            <li>Field-of-view is used for framing (min-size filter) and for the SNR measurement patch size (via arcsec/pixel).</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Sky quality + filters</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li><b>Bortle / SQM</b> estimates the sky brightness background.</li>
+            <li><b>Broadband RGB</b> uses the selected magnitude band from your JSON: <b>B</b>, <b>V</b>, or <b>R</b>.</li>
+            <li><b>Narrowband (nebulae)</b> uses an <b>Hα</b> bandpass selection: 20 nm / 9 nm / 6 nm / 3 nm.</li>
+          </ul>
+          <p class="note small">Broadband is used automatically for galaxies/clusters/most non-nebula targets; narrowband is used for nebula targets.</p>
+        </div>
+      </div>
+    </div>
+
+    <h2 id="charts" style="margin-top:20px;">Charts and views</h2>
+
+    <div class="how-grid">
+      <div class="card">
+        <div class="card-head"><div class="status">Tonight’s Visibility</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li>Shows the selected object’s track in Alt/Az over the night (polar plot).</li>
+            <li>Optional grid overlay: <b>Alt-Az</b> or <b>Equatorial</b>.</li>
+            <li>Moon path is drawn on the same plot, with a phase icon in the corner.</li>
+            <li>Visibility duration is computed by stepping through the night and checking altitude vs horizon.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Sky Image (Aladin)</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li>Interactive sky viewer (pan/zoom) centered on the selected target.</li>
+            <li>Switch surveys (e.g. DSS2, IR, Hα depending on what’s available).</li>
+            <li>Use this to sanity-check framing and nearby bright stars/nebula structure.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Monthly Visibility</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li>Shows how visibility changes across the year by month for your location/horizon.</li>
+            <li>This is a planning view: it helps you pick “seasonal” targets.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Moon info</div></div>
+        <div style="padding:12px;">
+          <ul class="tight">
+            <li>Moon phase is shown as illumination (%) and as a small phase graphic.</li>
+            <li>The planner also tracks the <b>closest separation</b> between Moon and target during the night.</li>
+            <li>That separation feeds into the SNR moonlight penalty described below.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <h2 id="table" style="margin-top:20px;">The object table</h2>
+    <div class="card">
+      <div class="card-head"><div class="status">Sorting, filtering, advanced columns</div></div>
+      <div style="padding:12px;">
+        <ul class="tight">
+          <li>The table is designed for <b>ranking</b> and <b>quick comparisons</b>.</li>
+          <li><b>Advanced mode</b> enables SNR sorting and shows extra columns like <b>Mag</b> and <b>Size</b>.</li>
+          <li>Use the minimum size slider to hide tiny targets that will be under-sampled or look “star-like” for your setup.</li>
+        </ul>
+      </div>
+    </div>
+
+    
+    <h2 id="snr" style="margin-top:20px;">SNR ranking model</h2>
+
+    <div class="card">
+      <div class="card-head"><div class="status">What SNR means here</div></div>
+      <div style="padding:12px;">
+        <p>
+          DeepSkyScout’s SNR is a <b>relative planning score</b> used to rank targets for your chosen setup.
+          It combines target brightness, angular size (a surface-brightness proxy), sky background (Bortle/SQM),
+          filter bandwidth, altitude/airmass, and moonlight. It is designed to be consistent and useful for comparing targets,
+          rather than being a fully calibrated exposure-time calculator.
+        </p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="card-head"><div class="status">Core equation</div></div>
+      <div style="padding:12px;">
+        <p class="small">
+          For a small measurement patch on the sensor, the score follows the standard background-limited form:
+        </p>
+        <p>
+          \[
+\mathrm{SNR}=\frac{S}{\sqrt{S+B_{\mathrm{sky}}+B_{\mathrm{moon}}}}
+\]
+        </p>
+        <p class="note small">
+          Where \(S\) is the target signal (photons in the patch) and the \(B\) terms are background photons accumulated in the same patch.
+          The final displayed SNR is capped (currently at 10000) to keep the UI stable.
+        </p>
+      </div>
+    </div>
+
+    <div class="how-grid" style="margin-top:14px;">
+      <div class="card">
+        <div class="card-head"><div class="status">Step 1 — Convert catalog brightness to photons</div></div>
+        <div style="padding:12px;">
+          <p class="small">
+            <b>Broadband (RGB)</b> uses the selected band magnitude (Blue→B, Green→V, Red→R).
+            The code converts magnitude to an approximate photon flux using:
+          </p>
+          <p>
+            \[
+F_{\gamma} = F_{\gamma,0}\;10^{-0.4\,m}
+\]
+          </p>
+          <p class="note small">
+            \(F_{\gamma,0}\) is an internal zero-point constant (and the code uses a representative central wavelength and bandpass per band).
+            This keeps ranking consistent even if absolute calibration is approximate.
+          </p>
+          <hr style="opacity:0.25;">
+          <p class="small">
+            <b>Narrowband (Hα)</b> uses integrated Hα line flux (when available in the JSON) and converts energy flux to photon flux:
+          </p>
+          <p>
+            \[
+F_{\gamma,\mathrm{H\alpha}} = F_{\mathrm{H\alpha}}\;\frac{\lambda_{\mathrm{H\alpha}}}{h\,c}
+\]
+          </p>
+          <p class="note small">
+            with \(\lambda_{\mathrm{H\alpha}}\approx 656.3\ \mathrm{nm}\). Narrowband sky background is reduced roughly in proportion to the selected
+            filter width (20/9/6/3 nm).
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Step 2 — Telescope throughput and collecting area</div></div>
+        <div style="padding:12px;">
+          <p class="small">
+            Flux is turned into detected photons using the telescope collecting area and an overall efficiency factor:
+          </p>
+          <p>
+            \[
+A_{\mathrm{tel}} = \pi\left(\frac{D}{2}\right)^2,\qquad
+            S \propto F_{\gamma}\;A_{\mathrm{tel}}\;\eta\;t
+\]
+          </p>
+          <p class="note small">
+            \(D\) is aperture, \(\eta\) bundles throughput/QE-like efficiency, and \(t\) is the integration time used internally for scoring.
+            (Because SNR is used as a ranking, the exact choice of \(t\) mostly scales all scores similarly.)
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="how-grid" style="margin-top:14px;">
+      <div class="card">
+        <div class="card-head"><div class="status">Step 3 — Size → surface brightness proxy</div></div>
+        <div style="padding:12px;">
+          <p class="small">
+            DeepSkyScout spreads integrated flux over the object’s angular area to estimate a surface brightness proxy.
+            Using the catalog ellipse (major/minor axes in arcminutes):
+          </p>
+          <p>
+            \[
+A_{\mathrm{obj}} \approx \pi\left(\frac{a}{2}\right)\left(\frac{b}{2}\right)\,(60^2)\ \mathrm{arcsec}^2
+\]
+          </p>
+          <p class="small">
+            To avoid “infinite SNR” from summing over an entire huge object, the score uses a fixed <b>measurement patch</b>
+            (a small \(N\times N\) pixel box, typically 5×5) based on your image scale:
+          </p>
+          <p>
+            \[
+A_{\mathrm{patch}} \approx \left(N\cdot s\right)^2,\qquad s=\mathrm{arcsec/pixel}
+\]
+          </p>
+          <p class="small">
+            The fraction of total object flux assumed to fall into the patch is:
+          </p>
+          <p>
+            \[
+f=\min\left(1,\frac{A_{\mathrm{patch}}}{A_{\mathrm{obj}}}\right),\qquad S \leftarrow S\cdot f
+\]
+          </p>
+          <p class="note small">
+            This is why compact objects (planetary nebulae, compact galaxies) can score higher than very extended diffuse objects.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="status">Step 4 — Sky background (SQM/Bortle)</div></div>
+        <div style="padding:12px;">
+          <p class="small">
+            Sky brightness is treated as a background surface brightness (mag/arcsec²) that is converted into photons per arcsec²,
+            then scaled to the patch area and bandpass:
+          </p>
+          <p>
+            \[
+B_{\mathrm{sky}} \propto F_{\gamma,\mathrm{sky}} \;A_{\mathrm{tel}}\;\eta\;t\;A_{\mathrm{patch}}
+\]
+          </p>
+          <p class="small">
+            Narrowband background is reduced relative to broadband by the chosen Hα filter width.
+            Broadband uses the selected RGB bandpass.
+          </p>
+          <p class="note small">
+            The model is primarily “signal vs sky background”; detailed camera noise terms (read noise/dark current) are not the focus.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px;">
+      <div class="card-head"><div class="status">Altitude, horizon, and meridian</div></div>
+      <div style="padding:12px;">
+        <p class="small">
+          For the night window (Sunset→Sunrise), DeepSkyScout samples the object’s altitude/azimuth and only treats it as usable
+          when it is above your selected horizon profile. The meridian time is the time of maximum altitude.
+        </p>
+        <p class="note small">
+          Higher altitude (lower airmass) improves results in practice; the score applies a mild altitude/airmass weighting so
+          targets low in the murk are penalized compared to those near culmination.
+        </p>
+      </div>
+    </div>
+
+
+    <h2 id="moon" style="margin-top:20px;">Moon impact on SNR</h2>
+
+    <div class="card">
+      <div class="card-head"><div class="status">How moonlight is applied</div></div>
+      <div style="padding:12px;">
+        <ul class="tight">
+          <li>The Moon position is sampled through the night (only when the target is above your horizon).</li>
+          <li>Extra sky brightness depends on:
+            <ul class="tight">
+              <li><b>Moon phase</b> (illumination fraction)</li>
+              <li><b>Moon altitude</b> (higher Moon → brighter background)</li>
+              <li><b>Angular separation</b> between Moon and target (closer → worse)</li>
+            </ul>
+          </li>
+          <li>That extra brightness is converted into additional sky background photons and added to the SNR denominator.</li>
+          <li>Broadband is penalized more strongly than narrowband.</li>
+        </ul>
+        <p class="note small">
+          The moonlight model is a <b>heuristic</b> scattering/brightening approximation meant for planning. It is not a site-specific atmospheric model.
+        </p>
+      </div>
+    </div>
+
+    <h2 id="assumptions" style="margin-top:20px;">Assumptions & limitations</h2>
+    <div class="card">
+      <div class="card-head"><div class="status">Important caveats</div></div>
+      <div style="padding:12px;">
+        <ul class="tight">
+          <li><b>Catalog data quality</b>: magnitudes, sizes, and line fluxes vary in completeness and quality.</li>
+          <li><b>Integrated magnitude ≠ surface brightness</b>: extended objects with bright cores and faint halos are simplified into one ellipse.</li>
+          <li><b>Camera noise terms</b> (read noise, dark current, gain, saturation) are not modeled in detail; the score is mainly signal vs sky background.</li>
+          <li><b>Throughput/QE</b> are treated as simple efficiency factors (not full spectral curves).</li>
+          <li><b>Weather/seeing/transparency</b> aren’t included; they can dominate night-to-night results.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div style="margin-top:18px; opacity:0.85;">
+      <a href="deepskyscout-web.html">← Back to DeepSkyScout</a>
+    </div>
+  </div>
+</body>
+</html>
