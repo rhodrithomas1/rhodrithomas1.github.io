@@ -17,7 +17,6 @@ Everything runs client-side in the browser.
 - `deepskyscout-web.html` – the DeepSkyScout planner UI
 - `how-it-works.html` – documentation explaining the planner and calculations
 
-> `projects.html` is not used anymore.
 
 ---
 
