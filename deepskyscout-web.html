@@ -9,6 +9,15 @@
 <link href="css/styles.css" rel="stylesheet"/>
 <!-- DeepSkyScout page-specific extracted CSS -->
 <link href="css/deepskyscout.css" rel="stylesheet"/>
+<script>
+(() => {
+  try {
+    if (localStorage.getItem('site_nightmode') === '1') {
+      document.documentElement.classList.add('nightmode');
+    }
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <nav>
@@ -16,6 +25,14 @@
 <a href="astro.html">Astro Photos</a>
 <a class="active" href="deepskyscout-web.html">DeepSkyScout</a>
 <a href="how-it-works.html">How it works</a>
+
+<button id="nightModeToggle" class="nightmode-toggle" type="button" aria-label="Toggle Nightmode" aria-pressed="false" title="Nightmode">
+  <svg class="nightmode-eye" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8" />
+    <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+  </svg>
+  <span class="nightmode-text">Nightmode</span>
+</button>
 </nav>
 <section class="hero">
 <h1>DeepSkyScout</h1>
@@ -108,7 +125,7 @@
 <input id="advancedToggle" type="checkbox"/>
     Advanced mode
   </label>
-<div class="muted" style="margin-top:6px;">Show Bortle + SNR estimate options.</div>
+<div class="muted" style="margin-top:6px;">Show Magnitude, Size and SNR Estimate.</div>
 </div>
 <div id="advancedControlsWrap" style="display:none;">
 <div class="form-row" id="bortleRow">

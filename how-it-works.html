@@ -36,15 +36,34 @@
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
+<script>
+(() => {
+  try {
+    if (localStorage.getItem('site_nightmode') === '1') {
+      document.documentElement.classList.add('nightmode');
+    }
+  } catch (e) {}
+})();
+</script>
 </head>
 
 <body>
   <nav>
-<a href="index.html">Home</a>
-<a href="astro.html">Astro Photos</a>
-<a href="deepskyscout-web.html">DeepSkyScout</a>
-<a class="active" href="how-it-works.html">How it works</a>
-</nav>
+  <a href="index.html">Home</a>
+  <a href="astro.html">Astro Photos</a>
+  <a href="deepskyscout-web.html">DeepSkyScout</a>
+  <a class="active" href="how-it-works.html">How it works</a>
+    <button id="nightModeToggle" class="nightmode-toggle" type="button"
+            aria-label="Toggle Nightmode" aria-pressed="false" title="Nightmode">
+      <svg class="nightmode-eye" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"
+              fill="none" stroke="currentColor" stroke-width="1.8" />
+        <circle cx="12" cy="12" r="3.2"
+                fill="none" stroke="currentColor" stroke-width="1.8" />
+      </svg>
+      <span class="nightmode-text">Nightmode</span>
+    </button>
+  </nav>
 
   <section class="hero">
     <h1>How DeepSkyScout Works</h1>
@@ -64,7 +83,7 @@
           <li>Use <b>Tonight’s Visibility</b> to see the sky track, then sort the table by <b>SNR</b> (Advanced mode).</li>
           <li>Switch to <b>Sky Image (Aladin)</b> to check framing and the surrounding field.</li>
         </ol>
-        <p class="note small">Tip: you can share a setup using the URL parameters (location/equipment/date/horizon). Opening the link restores the same planner state.</p>
+        <p class="note small">Tip: you can share a setup using the URL parameters (location/equipment/horizon). Opening the link restores the same planner state.</p>
       </div>
     </div>
 
@@ -395,5 +414,34 @@ B_{\mathrm{sky}} \propto F_{\gamma,\mathrm{sky}} \;A_{\mathrm{tel}}\;\eta\;t\;A_
       <a href="deepskyscout-web.html">← Back to DeepSkyScout</a>
     </div>
   </div>
+<script>
+(() => {
+  const KEY = "site_nightmode";
+  const btn = document.getElementById("nightModeToggle");
+  if (!btn) return;
+
+  function apply(on, persist) {
+    document.documentElement.classList.toggle("nightmode", !!on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.classList.toggle("on", !!on);
+    if (persist) {
+      try { localStorage.setItem(KEY, on ? "1" : "0"); } catch (e) {}
+    }
+  }
+
+  let on = document.documentElement.classList.contains("nightmode");
+  try {
+    const v = localStorage.getItem(KEY);
+    if (v === "1") on = true;
+    if (v === "0") on = false;
+  } catch (e) {}
+
+  apply(on, false);
+
+  btn.addEventListener("click", () => {
+    apply(!document.documentElement.classList.contains("nightmode"), true);
+  });
+})();
+</script>
 </body>
 </html>

@@ -5,12 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Astro Photos – Rhodri Thomas</title>
   <link rel="stylesheet" href="css/styles.css" />
+<script>
+(() => {
+  try {
+    if (localStorage.getItem('site_nightmode') === '1') {
+      document.documentElement.classList.add('nightmode');
+    }
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
   <nav>
     <a href="index.html">Home</a>
     <a href="astro.html" class="active">Astro Photos</a>
     <a href="deepskyscout-web.html">DeepSkyScout</a>
+      <a href="how-it-works.html">How it works</a>
+      <button id="nightModeToggle" class="nightmode-toggle" type="button"
+            aria-label="Toggle Nightmode" aria-pressed="false" title="Nightmode">
+      <svg class="nightmode-eye" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"
+              fill="none" stroke="currentColor" stroke-width="1.8" />
+        <circle cx="12" cy="12" r="3.2"
+                fill="none" stroke="currentColor" stroke-width="1.8" />
+      </svg>
+      <span class="nightmode-text">Nightmode</span>
+    </button>
   </nav>
 
   <div class="container">
@@ -35,5 +55,34 @@
   <footer>
     © 2026 Rhodri Thomas – Under a starry sky.
   </footer>
+<script>
+(() => {
+  const KEY = "site_nightmode";
+  const btn = document.getElementById("nightModeToggle");
+  if (!btn) return;
+
+  function apply(on, persist) {
+    document.documentElement.classList.toggle("nightmode", !!on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.classList.toggle("on", !!on);
+    if (persist) {
+      try { localStorage.setItem(KEY, on ? "1" : "0"); } catch (e) {}
+    }
+  }
+
+  let on = document.documentElement.classList.contains("nightmode");
+  try {
+    const v = localStorage.getItem(KEY);
+    if (v === "1") on = true;
+    if (v === "0") on = false;
+  } catch (e) {}
+
+  apply(on, false);
+
+  btn.addEventListener("click", () => {
+    apply(!document.documentElement.classList.contains("nightmode"), true);
+  });
+})();
+</script>
 </body>
 </html>
