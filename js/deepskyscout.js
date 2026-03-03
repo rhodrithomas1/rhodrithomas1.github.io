@@ -3015,7 +3015,7 @@ box.innerHTML = `
   function drawAltAzGrid(ctx, cx, cy, radiusMax) {
     ctx.save();
 
-    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.strokeStyle = chartVar("--chart-grid", "rgba(255,255,255,0.16)");
     ctx.lineWidth = 2.2;
     ctx.setLineDash([7, 7]);
     for (let alt = 15; alt <= 75; alt += 15) {
@@ -3037,7 +3037,7 @@ box.innerHTML = `
     }
     ctx.setLineDash([]);
 
-    ctx.fillStyle = "rgba(255,255,255,0.82)";
+    ctx.fillStyle = chartVar("--chart-text-muted", "rgba(255,255,255,0.82)");
     ctx.font = "15px ui-sans-serif, system-ui";
 
     for (let alt = 15; alt <= 75; alt += 15) {
@@ -3052,6 +3052,83 @@ box.innerHTML = `
       const x = cx + labelR * Math.sin(a);
       const y = cy - labelR * Math.cos(a);
       ctx.fillText(String(az), x - 10, y + 5);
+    }
+
+    ctx.restore();
+  }
+
+  function drawEquatorialGrid(ctx, cx, cy, radiusMax, loc){
+    // Projected RA/Dec grid at a reference time (use "now" clamped to the night window)
+    const latDeg = Number(loc.latitude);
+    const lonDeg = Number(loc.longitude);
+
+    const now = Date.now();
+    const start = NIGHT_WINDOW?.startUtc?.getTime?.() ?? now;
+    const end = NIGHT_WINDOW?.endUtc?.getTime?.() ?? now;
+    const refMs = (now < start) ? start : (now > end ? end : now);
+    const refDate = new Date(refMs);
+
+    ctx.save();
+
+    // Clip to the sky circle so below-horizon parts don't spill outside
+    ctx.beginPath();
+    ctx.arc(cx, cy, radiusMax, 0, Math.PI*2);
+    ctx.clip();
+
+    ctx.strokeStyle = chartVar("--chart-grid", "rgba(255,255,255,0.16)");
+    ctx.lineWidth = 2.0;
+    ctx.setLineDash([7, 7]);
+
+    // Declination curves (degrees)
+    const decLines = [-60, -45, -30, -15, 0, 15, 30, 45, 60];
+    const raStep = 3; // deg
+
+    for (const decDeg of decLines) {
+      let first = true;
+      ctx.beginPath();
+      for (let raDeg = 0; raDeg <= 360; raDeg += raStep) {
+        const aa = raDecToAltAz(refDate, raDeg % 360, decDeg, latDeg, lonDeg);
+        if (aa.altDeg <= 0) { first = true; continue; }
+        const p = projectAltAz(aa.altDeg, aa.azDeg, cx, cy, radiusMax);
+        if (first) { ctx.moveTo(p.x, p.y); first = false; }
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+
+    // Right Ascension curves (hours)
+    const raLines = [];
+    for (let h = 0; h < 24; h += 2) raLines.push(h * 15);
+
+    const decStep = 3; // deg
+    ctx.setLineDash([6, 9]);
+
+    for (const raDeg0 of raLines) {
+      let first = true;
+      ctx.beginPath();
+      for (let decDeg = -75; decDeg <= 75; decDeg += decStep) {
+        const aa = raDecToAltAz(refDate, raDeg0, decDeg, latDeg, lonDeg);
+        if (aa.altDeg <= 0) { first = true; continue; }
+        const p = projectAltAz(aa.altDeg, aa.azDeg, cx, cy, radiusMax);
+        if (first) { ctx.moveTo(p.x, p.y); first = false; }
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.stroke();
+    }
+
+    // Labels (simple declination labels near the top of the chart where visible)
+    ctx.setLineDash([]);
+    ctx.fillStyle = chartVar("--chart-text-muted", "rgba(255,255,255,0.82)");
+    ctx.font = "14px ui-sans-serif, system-ui";
+
+    for (const decDeg of [-60, -30, 0, 30, 60]) {
+      // Sample at RA = LST so it's near the meridian (often highest/most visible)
+      const jd = jdFromDate(refDate);
+      const lstDeg = clamp360(gmstDeg(jd) + lonDeg);
+      const aa = raDecToAltAz(refDate, lstDeg, decDeg, latDeg, lonDeg);
+      if (aa.altDeg <= 5) continue;
+      const p = projectAltAz(aa.altDeg, aa.azDeg, cx, cy, radiusMax);
+      ctx.fillText(`${decDeg}°`, p.x + 6, p.y - 6);
     }
 
     ctx.restore();
@@ -3101,7 +3178,7 @@ box.innerHTML = `
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.closePath();
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.fillStyle = chartVar("--chart-moon-lit", "rgba(255,255,255,0.92)");
     ctx.fill();
 
     // Clip to the base disk so only the overlap is visible
@@ -3124,7 +3201,7 @@ box.innerHTML = `
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.closePath();
-    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.strokeStyle = chartVar("--chart-icon-stroke", "rgba(255,255,255,0.55)");
     ctx.lineWidth = 1.4;
     ctx.stroke();
     ctx.restore();
@@ -3145,8 +3222,6 @@ box.innerHTML = `
     if (raDeg == null || decDeg == null) return;
 
     enforceMobileAltAz();
-    // (gridMode currently unused; kept for future expansion)
-    void getGridMode();
 
     const { ctx, w, h } = prepareCanvas(canvas, 380);
     ctx.clearRect(0, 0, w, h);
@@ -3157,13 +3232,13 @@ box.innerHTML = `
     const cy = h/2;
     const radiusMax = 0.46 * Math.min(w, h);
 
-    ctx.strokeStyle = "rgba(255,255,255,0.28)";
+    ctx.strokeStyle = chartVar("--chart-ring", "rgba(255,255,255,0.28)");
     ctx.lineWidth = 1.8;
     ctx.beginPath();
     ctx.arc(cx, cy, radiusMax, 0, Math.PI*2);
     ctx.stroke();
 
-    ctx.fillStyle = "rgba(255,255,255,0.86)";
+    ctx.fillStyle = chartVar("--chart-text", "rgba(255,255,255,0.86)");
     ctx.font = "16px ui-sans-serif, system-ui";
     const pad = 12;
     ctx.fillText("N", cx - 6, cy - radiusMax - pad);
@@ -3172,7 +3247,9 @@ box.innerHTML = `
     ctx.fillText("W", cx - radiusMax - pad - 14, cy + 6);
 
     // Grid
-    drawAltAzGrid(ctx, cx, cy, radiusMax);
+    const gridMode = getGridMode();
+    if (gridMode === "equ") drawEquatorialGrid(ctx, cx, cy, radiusMax, loc);
+    else drawAltAzGrid(ctx, cx, cy, radiusMax);
 
     // Horizon visualisation
     if (HORIZON_MODE === "custom" && HORIZON_PROFILE) drawCustomHorizon(ctx, cx, cy, radiusMax, horizonAtAzFn);
@@ -3379,7 +3456,7 @@ box.innerHTML = `
       ctx.save();
       ctx.font = "13px ui-sans-serif, system-ui";
 
-      const WHITE = "rgba(255,255,255,0.95)";
+      const WHITE = chartVar("--chart-text-strong", chartVar("--chart-text-strong", "rgba(255,255,255,0.95)"));
       const line1Seg = [
         { text: "Sunset ", color: COL_SUN },
         { text: fmt(nightStartMs), color: WHITE },
@@ -3469,7 +3546,7 @@ box.innerHTML = `
 
       // Horizon rise / set (green triangles) and meridian (magenta)
       drawMarker(riseMs,     "▲", COL_HZN, "rgba(0,0,0,0.92)", true);
-      drawMarker(meridianMs, "M", COL_MER, "rgba(255,255,255,0.95)", true);
+      drawMarker(meridianMs, "M", COL_MER, chartVar("--chart-text-strong", "rgba(255,255,255,0.95)"), true);
       drawMarker(setMs,      "▼", COL_HZN, "rgba(0,0,0,0.92)", true);
 }
 
@@ -3493,6 +3570,15 @@ box.innerHTML = `
     {
       const rMoon = clamp(Math.floor(Math.min(w, h) * 0.05), 14, 20);
       drawMoonPhaseIconOnCanvas(ctx, w - 12 - rMoon, 12 + rMoon, rMoon, moonPhaseForIcon);
+
+      // Label the phase icon
+      ctx.save();
+      ctx.fillStyle = chartVar("--chart-text", chartVar("--chart-text", "rgba(255,255,255,0.86)"));
+      ctx.font = "12px Roboto, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText("Moon", w - 12 - rMoon, 12 + rMoon + rMoon + 4);
+      ctx.restore();
     }
   }
 
@@ -3541,7 +3627,7 @@ box.innerHTML = `
     YEAR_BAR_HITBOXES = [];
 
     if (!YEAR_DATA) {
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.fillStyle = chartVar("--chart-text-muted2", "rgba(255,255,255,0.75)");
       ctx.font = "16px ui-sans-serif, system-ui";
       ctx.fillText("Select an object to compute Monthly Visibility.", 18, 34);
       return;
@@ -3559,7 +3645,7 @@ box.innerHTML = `
     const right = w - 18;
     const bottom = h - 54;
 
-    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.strokeStyle = chartVar("--chart-grid2", "rgba(255,255,255,0.18)");
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(left, top);
@@ -3567,14 +3653,14 @@ box.innerHTML = `
     ctx.lineTo(right, bottom);
     ctx.stroke();
 
-    ctx.fillStyle = "rgba(255,255,255,0.78)";
+    ctx.fillStyle = chartVar("--chart-text2", "rgba(255,255,255,0.78)");
     ctx.font = "13px ui-sans-serif, system-ui";
 
     for (let hh = 0; hh <= yMaxH; hh += 2) {
       const f = (hh / yMaxH);
       const y = bottom - f * (bottom - top);
 
-      ctx.strokeStyle = "rgba(255,255,255,0.10)";
+      ctx.strokeStyle = chartVar("--chart-grid3", "rgba(255,255,255,0.10)");
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(left, y);
@@ -3599,14 +3685,14 @@ box.innerHTML = `
 
       YEAR_BAR_HITBOXES.push({ idx: i, x, w: barW, top, bottom });
 
-      ctx.fillStyle = "rgba(255,255,255,0.82)";
+      ctx.fillStyle = chartVar("--chart-text-muted", "rgba(255,255,255,0.82)");
       ctx.font = "12px ui-sans-serif, system-ui";
       const label = monthsShort[i];
       const tw = ctx.measureText(label).width;
       ctx.fillText(label, x + (barW - tw)/2, bottom + 18);
     }
 
-    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.fillStyle = chartVar("--chart-text4", "rgba(255,255,255,0.88)");
     ctx.font = "16px ui-sans-serif, system-ui";
     ctx.fillText(`Monthly Visibility (${YEAR_DATA.year})`, left, 20);
 
@@ -4081,6 +4167,91 @@ box.innerHTML = `
     });
   }
 
+
+  // -----------------------------
+  // Nightmode (persisted)
+  // -----------------------------
+  const LS_NIGHTMODE = "site_nightmode";
+
+  function chartVar(name, fallback) {
+    try {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      return v || fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  function isNightModeOn() {
+    return document.documentElement.classList.contains("nightmode");
+  }
+
+  function setNightMode(enabled, opts = {}) {
+    const { persist = true, redraw = true } = opts;
+    document.documentElement.classList.toggle("nightmode", !!enabled);
+
+    if (persist) {
+      try { localStorage.setItem(LS_NIGHTMODE, enabled ? "1" : "0"); } catch (e) {}
+    }
+
+    const btn = document.getElementById("nightModeToggle");
+    if (btn) {
+      btn.setAttribute("aria-pressed", enabled ? "true" : "false");
+      btn.classList.toggle("on", !!enabled);
+    }
+
+    if (redraw) {
+      try { updateAllRangeFills(); } catch (e) {}
+      try { drawNightChart(); } catch (e) {}
+      try { drawYearChart(); } catch (e) {}
+    }
+  }
+
+  function wireNightModeToggle() {
+    const btn = document.getElementById("nightModeToggle");
+    if (!btn) return;
+
+    // Initial state from storage (fallback to current class if storage fails)
+    let on = isNightModeOn();
+    try {
+      const v = localStorage.getItem(LS_NIGHTMODE);
+      if (v === "1") on = true;
+      if (v === "0") on = false;
+    } catch (e) {}
+
+    setNightMode(on, { persist: false, redraw: false });
+
+    btn.addEventListener("click", () => {
+      setNightMode(!isNightModeOn(), { persist: true, redraw: true });
+    });
+  }
+
+
+  // -----------------------------
+  // Range slider fill (Nightmode)
+  // -----------------------------
+  function updateRangeFill(el){
+    if (!el) return;
+    const min = Number(el.min || 0);
+    const max = Number(el.max || 100);
+    const val = Number(el.value || 0);
+    const pct = (max > min) ? ((val - min) / (max - min)) * 100 : 0;
+    el.style.setProperty("--p", pct.toFixed(2) + "%");
+  }
+
+  function updateAllRangeFills(){
+    document.querySelectorAll('input[type="range"]').forEach(updateRangeFill);
+  }
+
+  function wireRangeFills(){
+    const ranges = document.querySelectorAll('input[type="range"]');
+    ranges.forEach(r => {
+      updateRangeFill(r);
+      r.addEventListener("input", () => updateRangeFill(r));
+      r.addEventListener("change", () => updateRangeFill(r));
+    });
+  }
+
   // -----------------------------
   // Init
   // -----------------------------
@@ -4111,6 +4282,8 @@ box.innerHTML = `
     wireAdvancedModeControls();
     await applyUrlStateFromQuery();
     wirePlannerLinkUI();
+    wireNightModeToggle();
+    wireRangeFills();
 
     $("viewNight").checked = true;
     setViewMode("night");
