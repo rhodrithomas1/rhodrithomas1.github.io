@@ -1,160 +1,340 @@
 /* Import cosmic fonts */
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400&display=swap');
 
-/* Color variables */
-:root {
+/* =========================
+   Theme variables
+   ========================= */
+:root{
   --bg: #0b0f2f;
-  --surface: rgba(20, 24, 50, 0.85);
+  --surface: rgba(20, 24, 50, 0.86);
+  --surface-2: rgba(255, 255, 255, 0.04);
   --text: #e0e7ff;
   --accent: #ffdd57;
-  --muted: #a0aec0;
+  --muted: rgba(224,231,255,0.72);
+
+  --border: rgba(255,255,255,0.12);
+  --border-2: rgba(255,255,255,0.10);
+
+  --radius: 14px;
+  --radius-sm: 10px;
+
+  --shadow: 0 10px 30px rgba(0,0,0,0.28);
+  --shadow-sm: 0 6px 18px rgba(0,0,0,0.22);
 }
 
-/* Global reset & base */
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-body {
+/* =========================
+   Global reset & base
+   ========================= */
+*{ box-sizing:border-box; margin:0; padding:0; }
+
+html, body{ height:100%; }
+
+body{
   font-family: 'Roboto', sans-serif;
-  background: var(--bg) url('../assets/astro/starfield.jpg') center/cover no-repeat;
+  background: var(--bg) url('../assets/astro/starfield.jpg') center/cover no-repeat fixed;
   color: var(--text);
   line-height: 1.6;
+  text-rendering: optimizeLegibility;
 }
-a {
+
+a{
   color: var(--accent);
   text-decoration: none;
 }
-a:hover {
-  text-decoration: underline;
+a:hover{ text-decoration: underline; text-underline-offset: 3px; }
+
+:focus-visible{
+  outline: 2px solid rgba(255,221,87,0.7);
+  outline-offset: 3px;
+  border-radius: 6px;
 }
 
-/* Layout */
-.container {
-  max-width: 960px;
+/* =========================
+   Layout containers
+   ========================= */
+.container{
+  max-width: 1100px;              /* a bit wider than before */
   margin: 0 auto;
   padding: 2rem 1rem;
   background: var(--surface);
-  border-radius: 8px;
-  backdrop-filter: blur(4px);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow);
 }
 
-/* Navbar */
-nav {
-  display: flex;
-  justify-content: center;
+/* Optional helpers for “big pages” like planners */
+.container.wide{
+  max-width: none;
+  margin-left: 24px;
+  margin-right: 24px;
+}
+.container.full{
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* =========================
+   Navbar
+   ========================= */
+nav{
+  display:flex;
+  justify-content:center;
   gap: 2rem;
-  padding: 1rem;
-  background: rgba(10, 15, 40, 0.9);
+  padding: 0.9rem 1rem;
+  background: rgba(10, 15, 40, 0.75);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(10px);
   position: sticky;
   top: 0;
   z-index: 100;
 }
-nav a {
+
+nav a{
   font-family: 'Orbitron', sans-serif;
   font-weight: 400;
   letter-spacing: 0.05em;
-  color: var(--text);
-}
-nav a.active {
-  color: var(--accent);
+  color: rgba(224,231,255,0.90);
+  padding: 0.25rem 0.2rem;
+  border-radius: 8px;
 }
 
-/* Hero (index) */
-.hero {
-  text-align: center;
-  padding: 4rem 1rem;
+nav a:hover{
+  color: var(--text);
+  text-decoration: none;
+  background: rgba(255,255,255,0.06);
 }
-.hero h1 {
-  font-family: 'Orbitron', sans-serif;
-  font-size: 3rem;
-  margin-bottom: 1rem;
+
+nav a.active{
   color: var(--accent);
+  background: rgba(255,221,87,0.10);
 }
-.hero p {
-  max-width: 600px;
-  margin: 0 auto 2rem;
-  font-size: 1.1rem;
+
+/* =========================
+   Hero
+   ========================= */
+.hero{
+  text-align:center;
+  padding: 3.2rem 1rem 2.2rem;
+}
+
+.hero h1{
+  font-family: 'Orbitron', sans-serif;
+  font-size: clamp(2.2rem, 3.6vw, 3rem);
+  margin-bottom: 0.75rem;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.hero p{
+  max-width: 720px;
+  margin: 0 auto 1.6rem;
+  font-size: 1.05rem;
   color: var(--muted);
 }
-.button {
-  display: inline-block;
+
+/* Buttons */
+.button{
+  display:inline-block;
   background: var(--accent);
   color: var(--bg);
-  padding: 0.75rem 1.5rem;
-  border-radius: 4px;
-  font-weight: bold;
-  transition: transform 0.2s;
-}
-.button:hover {
-  transform: scale(1.05);
+  padding: 0.75rem 1.3rem;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease, filter 0.15s ease;
 }
 
-/* Gallery (astro.html) */
-.gallery {
-  display: grid;
+.button:hover{
+  transform: translateY(-1px);
+  filter: brightness(1.02);
+  text-decoration: none;
+}
+
+/* =========================
+   Gallery (astro.html)
+   ========================= */
+.gallery{
+  display:grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 1rem;
 }
-.gallery img {
-  width: 100%;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-.gallery img:hover {
-  transform: scale(1.03);
-}
 
-/* Cards (projects.html) */
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px,1fr));
+.gallery img{
+  width:100%;
+  border-radius: var(--radius-sm);
+  cursor:pointer;
+  transition: transform 0.18s ease;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.gallery img:hover{ transform: scale(1.02); }
+
+/* =========================
+   Cards (projects.html etc)
+   ========================= */
+.cards{
+  display:grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 1.5rem;
 }
-.card {
-  background: var(--bg);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 8px;
-  overflow: hidden;
-  display: flex;
+
+.card{
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow:hidden;
+  display:flex;
   flex-direction: column;
-  transition: transform 0.2s;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.18s ease, background 0.18s ease;
 }
-.card:hover {
+
+.card:hover{
   transform: translateY(-4px);
+  background: rgba(255,255,255,0.06);
 }
-.card img {
-  width: 100%;
+
+.card img{
+  width:100%;
   height: 160px;
   object-fit: cover;
+  border-bottom: 1px solid rgba(255,255,255,0.10);
 }
-.card-content {
-  padding: 1rem;
-  flex: 1;
+
+.card-content{
+  padding: 1rem 1.05rem 1.1rem;
+  flex:1;
 }
-.card-content h3 {
+
+.card-content h3{
   font-family: 'Orbitron', sans-serif;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.45rem;
   color: var(--accent);
+  font-size: 1.05rem;
 }
-.card-content p {
+
+.card-content p{
   color: var(--muted);
   font-size: 0.95rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.9rem;
 }
-.card-content a {
-  margin-top: auto;
-  display: inline-block;
-  font-weight: bold;
+
+.card-content a{
+  display:inline-block;
+  font-weight: 700;
   color: var(--accent);
 }
 
-/* Footer */
-footer {
-  text-align: center;
+/* =========================
+   Footer
+   ========================= */
+footer{
+  text-align:center;
   padding: 2rem 1rem;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
+}
+
+/* =========================
+   Small-screen polish
+   ========================= */
+@media (max-width: 600px){
+  nav{ gap: 1rem; }
+  .container{
+    padding: 1.4rem 0.9rem;
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+  .hero{ padding: 2.2rem 1rem 1.4rem; }
+}
+
+/* =========================
+   Site-wide Nightmode
+   ========================= */
+html.nightmode{
+  /* keep --accent (yellow) as-is */
+  --bg: #050505;
+  --surface: rgba(16, 16, 16, 0.92);
+  --surface-2: rgba(255, 255, 255, 0.03);
+
+  --text: #ff4d4d;
+  --muted: rgba(255, 77, 77, 0.72);
+
+  --border: rgba(255, 77, 77, 0.18);
+  --border-2: rgba(255, 77, 77, 0.12);
+}
+
+html.nightmode body{
+  background: var(--bg) !important;
+  background-image: linear-gradient(#000, #121212) !important;
+  color: var(--text);
+}
+
+/* Navbar in nightmode */
+html.nightmode nav{
+  background: rgba(0, 0, 0, 0.78) !important;
+  border-bottom: 1px solid rgba(255, 77, 77, 0.12) !important;
+}
+
+html.nightmode nav a{
+  color: rgba(255, 77, 77, 0.92) !important;
+}
+
+html.nightmode nav a:hover{
+  color: rgba(255, 120, 120, 0.98) !important;
+  background: rgba(255, 77, 77, 0.10) !important;
+  text-decoration: none;
+}
+
+html.nightmode nav a.active{
+  color: #ff4d4d !important;
+  background: rgba(255, 77, 77, 0.16) !important;
+  border: 1px solid rgba(255, 77, 77, 0.48) !important;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(255, 77, 77, 0.22), 0 0 14px rgba(255, 77, 77, 0.18);
+}
+
+/* Nightmode toggle button (top-right in navbar) */
+.nightmode-toggle{
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 77, 77, 0.30);
+  background: rgba(0, 0, 0, 0.22);
+
+  color: #ff4d4d;
+  cursor: pointer;
+  user-select: none;
+
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+}
+
+.nightmode-toggle:hover{
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.nightmode-toggle .nightmode-text{
+  line-height: 1;
+}
+
+/* Slightly smaller on narrow screens */
+@media (max-width: 600px){
+  .nightmode-toggle{
+    right: 10px;
+    padding: 5px 8px;
+    font-size: 0.68rem;
+  }
 }

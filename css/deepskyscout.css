@@ -2,6 +2,22 @@
 
 :root{
   --viewerH: 60vh; /* exactly 60% of viewport height */
+
+  /* Canvas theme vars (JS reads these) */
+  --chart-grid: rgba(255,255,255,0.16);
+  --chart-grid2: rgba(255,255,255,0.18);
+  --chart-grid3: rgba(255,255,255,0.10);
+  --chart-ring: rgba(255,255,255,0.28);
+
+  --chart-text: rgba(255,255,255,0.86);
+  --chart-text2: rgba(255,255,255,0.78);
+  --chart-text-muted: rgba(255,255,255,0.82);
+  --chart-text-muted2: rgba(255,255,255,0.75);
+  --chart-text-strong: rgba(255,255,255,0.95);
+  --chart-text4: rgba(255,255,255,0.88);
+
+  --chart-moon-lit: rgba(255,255,255,0.92);
+  --chart-icon-stroke: rgba(255,255,255,0.55);
 }
 
 .container.planner-container{
@@ -665,4 +681,179 @@ td.snr-cell{
   background: rgba(255,255,255,.03);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
+}
+
+
+/* =============================
+   Nightmode overrides (DeepSkyScout test)
+   - Keep existing colored accents
+   - Turn "white" UI text to red
+   - Turn blue surfaces/backgrounds to black/grey
+   ============================= */
+html.nightmode{
+  /* Override global theme vars from css/styles.css */
+  --bg: #050505;
+  --surface: rgba(16,16,16,0.92);
+  --surface-2: rgba(255,255,255,0.03);
+
+  --text: #ff4d4d;
+  --muted: rgba(255,77,77,0.72);
+
+  --border: rgba(255,77,77,0.18);
+  --border-2: rgba(255,77,77,0.12);
+
+  /* Canvas vars become red */
+  --chart-grid: rgba(255,77,77,0.16);
+  --chart-grid2: rgba(255,77,77,0.18);
+  --chart-grid3: rgba(255,77,77,0.10);
+  --chart-ring: rgba(255,77,77,0.28);
+
+  --chart-text: rgba(255,77,77,0.86);
+  --chart-text2: rgba(255,77,77,0.78);
+  --chart-text-muted: rgba(255,77,77,0.82);
+  --chart-text-muted2: rgba(255,77,77,0.75);
+  --chart-text-strong: rgba(255,77,77,0.95);
+  --chart-text4: rgba(255,77,77,0.88);
+
+  --chart-moon-lit: rgba(255,77,77,0.92);
+  --chart-icon-stroke: rgba(255,77,77,0.55);
+}
+
+/* Kill the starfield image + any blue tint behind surfaces */
+html.nightmode body{
+  background: var(--bg) !important;
+  background-image: linear-gradient(#000, #121212) !important;
+}
+
+/* Navbar: remove blue background, keep tab layout the same */
+html.nightmode nav{
+  background: rgba(0,0,0,0.78) !important;
+  border-bottom: 1px solid rgba(255,77,77,0.12) !important;
+}
+
+html.nightmode nav a{
+  color: rgba(255,77,77,0.92) !important;
+}
+
+html.nightmode nav a:hover{
+  color: rgba(255,120,120,0.98) !important;
+  background: rgba(255,77,77,0.10) !important;
+}
+
+html.nightmode nav a.active{
+  color: #ff4d4d !important;
+  background: rgba(255,77,77,0.16) !important;
+  border: 1px solid rgba(255,77,77,0.48) !important;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px rgba(255,77,77,0.22), 0 0 14px rgba(255,77,77,0.18);
+}
+
+/* Sticky table header had a blue/indigo tint */
+html.nightmode thead th{
+  background: rgba(0,0,0,0.90) !important;
+}
+
+/* Nightmode button sits at far right without affecting tab spacing */
+.nightmode-toggle{
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+
+  padding: 6px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,77,77,0.30);
+  background: rgba(0,0,0,0.22);
+
+  color: #ff4d4d;
+  cursor: pointer;
+  user-select: none;
+
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+}
+
+.nightmode-toggle:hover{
+  background: rgba(255,255,255,0.04);
+}
+
+.nightmode-toggle .nightmode-eye{
+  display:block;
+}
+
+.nightmode-toggle .nightmode-text{
+  line-height: 1;
+}
+
+html.nightmode .hero h1{
+  color: #ff4d4d !important;
+  text-shadow: 0 0 18px rgba(255,77,77,0.18);
+}
+
+
+/* --- Nightmode range sliders --- */
+/* Nightmode range sliders: red fill + darker grey remainder */
+html.nightmode{
+  --range-fill: rgba(255,77,77,0.88);
+  --range-rest: rgba(255,255,255,0.16);
+}
+
+html.nightmode input[type="range"]{
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--range-fill) 0%,
+    var(--range-fill) var(--p, 0%),
+    var(--range-rest) var(--p, 0%),
+    var(--range-rest) 100%
+  );
+  outline: none;
+}
+
+/* WebKit track/thumb */
+html.nightmode input[type="range"]::-webkit-slider-runnable-track{
+  height: 6px;
+  background: transparent;
+  border-radius: 999px;
+}
+
+html.nightmode input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255,77,77,0.98);
+  border: 2px solid rgba(0,0,0,0.65);
+  box-shadow: 0 0 0 1px rgba(255,77,77,0.25), 0 0 10px rgba(255,77,77,0.15);
+  margin-top: -5px; /* centers thumb on 6px track */
+}
+
+/* Firefox track/progress/thumb */
+html.nightmode input[type="range"]::-moz-range-track{
+  height: 6px;
+  background: var(--range-rest);
+  border-radius: 999px;
+}
+
+html.nightmode input[type="range"]::-moz-range-progress{
+  height: 6px;
+  background: var(--range-fill);
+  border-radius: 999px;
+}
+
+html.nightmode input[type="range"]::-moz-range-thumb{
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255,77,77,0.98);
+  border: 2px solid rgba(0,0,0,0.65);
+  box-shadow: 0 0 0 1px rgba(255,77,77,0.25), 0 0 10px rgba(255,77,77,0.15);
 }
