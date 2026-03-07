@@ -142,10 +142,54 @@
     const toks = queryTokens(NAME_QUERY);
     if (!toks.length) return true;
 
-    const hay = normSearch(`${o?.name ?? ""} ${o?.common_name ?? ""}`);
+    const a = Array.isArray(o?.aliases) ? o.aliases.join(" ") : "";
+    const hay = normSearch(`${o?.name ?? ""} ${o?.common_name ?? ""} ${a}`);
 
-    // Every token must appear somewhere in name or common name
+    // Every token must appear somewhere in name/common name/aliases
     return toks.every(t => hay.includes(normSearch(t)));
+  }
+
+  // Pick the single "best" alias that matches the current search tokens.
+  // Used only for display (so search can surface an alias like "Duck Head Nebula"
+  // even if the object's canonical common name is different).
+  function bestAliasMatchForSearch(o, toks){
+    if (!toks?.length) return null;
+    const aliases = Array.isArray(o?.aliases) ? o.aliases : [];
+    if (!aliases.length) return null;
+
+    const t0 = normSearch(toks[0] || "");
+    let best = null;
+    let bestStarts = 9;
+    let bestLen = 1e9;
+    let bestIdx = 1e9;
+
+    for (let i = 0; i < aliases.length; i++){
+      const raw = String(aliases[i] ?? "").trim();
+      if (!raw) continue;
+
+      const h = normSearch(raw);
+      if (!toks.every(t => h.includes(normSearch(t)))) continue;
+
+      const starts = (t0 && h.startsWith(t0)) ? 0 : 1;
+      const L = raw.length;
+
+      if (best == null || starts < bestStarts || (starts === bestStarts && (L < bestLen || (L === bestLen && i < bestIdx)))){
+        best = raw;
+        bestStarts = starts;
+        bestLen = L;
+        bestIdx = i;
+      }
+    }
+
+    // Don't "swap" if the alias is effectively the same as the canonical labels.
+    if (best){
+      const b = normSearch(best);
+      const n = normSearch(o?.name ?? "");
+      const cn = normSearch(o?.common_name ?? "");
+      if (b === n || (cn && b === cn)) return null;
+    }
+
+    return best;
   }
 
   let aladin = null;
@@ -406,8 +450,16 @@ function applyObjectsTableColumnVisibility(){
   const adv = isAdvancedModeEnabled();
   const mob = isMobileNarrow();
 
+  // Hide the separate Common Name column (we display it under the main name instead)
+  const commonArrow = document.getElementById('arrow-common_name');
+  if (commonArrow) {
+    const th = commonArrow.closest('th');
+    if (th) th.classList.add('hide-common');
+  }
+
   function shouldShow(el){
     let show = true;
+    if (el.classList.contains('hide-common')) show = false;
     if (el.classList.contains('mobile-only')) show = show && mob;
     if (el.classList.contains('desktop-only')) show = show && !mob;
     if (el.classList.contains('advanced-only')) show = show && adv;
@@ -1909,19 +1961,32 @@ async function applyUrlStateFromQuery(){
 
   function parseRaDeg(ra) {
     if (ra == null) return null;
-    if (typeof ra === "number") return ra <= 24 ? ra * 15 : ra;
+
+    // JSON now stores RA in decimal degrees.
+    // Only convert from hours when the input is explicitly sexagesimal.
+    if (typeof ra === "number") return ra;
+
     const s = String(ra).trim();
     if (!s) return null;
     const nums = parseNums(s);
     if (!nums || nums.length === 0) return null;
+
+    // Explicit HMS formats like "00h 52m 59s" or "00:52:59".
     if (s.includes("h") || s.includes(":")) {
       const h = nums[0] ?? 0;
       const m = nums[1] ?? 0;
       const sec = nums[2] ?? 0;
       return (h + m/60 + sec/3600) * 15;
     }
-    const v = nums[0];
-    return v <= 24 ? v * 15 : v;
+
+    // Plain decimal string like "13.24583333" -> already degrees.
+    if (nums.length === 1) return nums[0];
+
+    // Space-separated sexagesimal without letters, e.g. "00 52 59".
+    const h = nums[0] ?? 0;
+    const m = nums[1] ?? 0;
+    const sec = nums[2] ?? 0;
+    return (h + m/60 + sec/3600) * 15;
   }
 
   function parseDecDeg(dec) {
@@ -2587,6 +2652,35 @@ async function applyUrlStateFromQuery(){
     return n;
   }
 
+  function formatNameStackHtml(o){
+    const toks = queryTokens(NAME_QUERY);
+
+    // If the search matches an alias (e.g. "Duck Head Nebula"), show that alias as the main line,
+    // and keep the object's canonical common name underneath (e.g. "Thor's Helmet Nebula").
+    const aliasHit = toks.length ? bestAliasMatchForSearch(o, toks) : null;
+
+    const primaryRaw = aliasHit ? aliasHit : String(o?.name ?? "");
+    const primary = safe(primaryRaw);
+
+    // Default subtext is the common name
+    let subRaw = String(o?.common_name ?? "").trim();
+
+    // In alias-hit mode: keep canonical common name as subtext; if missing, fall back to canonical name.
+    if (aliasHit){
+      if (!subRaw) subRaw = String(o?.name ?? "").trim();
+    }
+
+    // Avoid duplicates between lines
+    const pNorm = normSearch(primaryRaw);
+    if (subRaw && normSearch(subRaw) === pNorm) subRaw = "";
+
+    if (!subRaw) return `<div>${primary}</div>`;
+
+    const sub = safe(subRaw);
+    return `<div>${primary}</div><div class="muted" style="font-family: ui-sans-serif, system-ui; font-size: 0.85em; margin-top:2px;">${sub}</div>`;
+  }
+
+
   function renderObjectsTable() {
     const tbody = $("objectsTbody");
     tbody.innerHTML = "";
@@ -2601,14 +2695,14 @@ async function applyUrlStateFromQuery(){
       if (idx === selectedObjectIdx) tr.classList.add("selected");
 
       tr.innerHTML = `
-        <td class="mono">${formatMobileMergedName(o)}</td>
+        <td class="mono">${formatNameStackHtml(o)}</td>
 
         <!-- mobile visibility (2nd col) -->
         <td class="vis-cell mobile-only">${visH.toFixed(2)}h</td>
 
         <td class="snr-cell advanced-only mobile-only">${formatSNRScore(computeSNRScoreForIdx(idx))}</td>
 
-        <td class="desktop-only">${safe(o.common_name)}</td>
+        <td class="desktop-only hide-common">${safe(o.common_name)}</td>
         <td class="advanced-only desktop-only">${formatObjectMagnitude(o)}</td>
         <td class="advanced-only desktop-only">${formatSize(o)}</td>
         <td>${safe(o.type)}</td>
@@ -3577,7 +3671,24 @@ box.innerHTML = `
       ctx.font = "12px Roboto, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
-      ctx.fillText("Moon", w - 12 - rMoon, 12 + rMoon + rMoon + 4);
+      const moonLabelX = w - 12 - rMoon;
+      let moonLabelY = 12 + rMoon + rMoon + 4;
+      ctx.fillText("Moon", moonLabelX, moonLabelY);
+
+      const moonInfo = buildTonightData(loc)?.moon || null;
+      if (moonInfo && moonInfo.phase) {
+        ctx.font = "11px Roboto, sans-serif";
+        const moonLines = [
+          `${moonInfo.phase.illumPct}%`,
+          `${moonInfo.phase.name}`,
+          ...(moonInfo.minSepDeg != null ? [`Closest ${moonInfo.minSepDeg.toFixed(0)}°`] : [])
+        ];
+        moonLabelY += 14;
+        for (const line of moonLines) {
+          ctx.fillText(line, moonLabelX, moonLabelY);
+          moonLabelY += 14;
+        }
+      }
       ctx.restore();
     }
   }
