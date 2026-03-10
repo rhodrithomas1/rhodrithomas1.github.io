@@ -18,6 +18,12 @@
 
   --chart-moon-lit: rgba(255,255,255,0.92);
   --chart-icon-stroke: rgba(255,255,255,0.55);
+
+  /* Active sorted column highlight */
+  --sorted-col-head-bg: rgba(120,180,255,.16);
+  --sorted-col-cell-bg: rgba(120,180,255,.10);
+  --sorted-col-border: rgba(120,180,255,.18);
+  --sorted-col-selected-bg: rgba(120,180,255,.18);
 }
 
 .container.planner-container{
@@ -360,10 +366,26 @@ tbody tr.selected{
   outline-offset:-1px;
 }
 
-td.vis-cell{
-  background:rgba(120,180,255,.10);
-  border-left:1px solid rgba(120,180,255,.18);
+/* Numeric emphasis only; no permanent visibility highlight */
+td.vis-cell,
+td.snr-cell{
+  font-variant-numeric: tabular-nums;
   font-weight:600;
+}
+
+/* Active sorted column highlight */
+thead th.sorted-col{
+  background: var(--sorted-col-head-bg);
+  box-shadow: inset 0 -1px 0 rgba(255,255,255,.08);
+}
+
+tbody td.sorted-col{
+  background: var(--sorted-col-cell-bg);
+  box-shadow: inset 1px 0 0 var(--sorted-col-border);
+}
+
+tbody tr.selected td.sorted-col{
+  background: var(--sorted-col-selected-bg);
 }
 
 .mono{
@@ -387,13 +409,103 @@ td.vis-cell{
 
 #yearCanvas{ cursor:pointer; }
 
+#imagePane{
+  display:none;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  min-height:0;
+}
+
+#aladinWrap{
+  position:relative;
+  width:100%;
+  max-width:100%;
+  margin:0 auto;
+  flex:0 0 auto;
+}
+
 #aladinDiv{
   width:100%;
-  height: 620px;
+  height:100%;
+  margin:0;
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,.10);
   overflow:hidden;
   background: rgba(0,0,0,.18);
+}
+
+#aladinFrameControls{
+  width:min(100%, 720px);
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-wrap:wrap;
+  padding:8px 12px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.10);
+  background:rgba(255,255,255,.04);
+}
+
+#aladinFrameControls label{
+  min-width:120px;
+}
+
+#aladinFrameControls .preview-mode-group{
+  flex:1 1 320px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+#aladinFrameControls .seg{
+  position:relative;
+  display:inline-flex;
+}
+
+#aladinFrameControls .seg input{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+
+#aladinFrameControls .seg span{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:92px;
+  padding:9px 14px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.04);
+  color:inherit;
+  cursor:pointer;
+  transition:background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+#aladinFrameControls .seg span:hover{
+  background:rgba(255,255,255,.07);
+}
+
+#aladinFrameControls .seg-toggle span{
+  min-width:74px;
+}
+
+#aladinFrameControls .seg-toggle{
+  margin-left:auto;
+}
+
+#aladinFrameControls .seg input:checked + span{
+  background:rgba(255,107,94,.14);
+  border-color:rgba(255,107,94,.45);
+  box-shadow:0 0 0 1px rgba(255,107,94,.18) inset;
+}
+
+#aladinFrameControls .seg input:focus-visible + span{
+  outline:2px solid rgba(255,107,94,.45);
+  outline-offset:2px;
 }
 
 .chart-foot{
@@ -649,6 +761,15 @@ td.vis-cell{
     margin-left: 0;
     white-space: normal;
   }
+
+  #aladinFrameControls{
+    padding:8px 10px;
+  }
+
+  #aladinFrameControls label{
+    min-width:auto;
+    width:100%;
+  }
 }
 
 @media (max-width: 900px) and (orientation: landscape){
@@ -675,12 +796,6 @@ body.advanced-on .advanced-only.desktop-only{
   body.advanced-on .advanced-only.mobile-only{
     display: table-cell !important;
   }
-}
-
-td.snr-cell{
-  background: rgba(255,255,255,.03);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
 }
 
 
@@ -717,6 +832,12 @@ html.nightmode{
 
   --chart-moon-lit: rgba(255,77,77,0.92);
   --chart-icon-stroke: rgba(255,77,77,0.55);
+
+  /* Active sorted column highlight in night mode */
+  --sorted-col-head-bg: rgba(255,77,77,.14);
+  --sorted-col-cell-bg: rgba(255,77,77,.08);
+  --sorted-col-border: rgba(255,77,77,.18);
+  --sorted-col-selected-bg: rgba(255,77,77,.14);
 }
 
 /* Kill the starfield image + any blue tint behind surfaces */
@@ -857,3 +978,7 @@ html.nightmode input[type="range"]::-moz-range-thumb{
   border: 2px solid rgba(0,0,0,0.65);
   box-shadow: 0 0 0 1px rgba(255,77,77,0.25), 0 0 10px rgba(255,77,77,0.15);
 }
+
+
+/* Hide the legacy Subtype column (JS adds this class to the th/td). */
+th.hide-subtype, td.hide-subtype{ display:none !important; }
