@@ -221,7 +221,22 @@
 <canvas id="skyCanvas"></canvas>
 </div>
 <div id="imagePane" style="display:none;">
+<div id="aladinWrap">
 <div id="aladinDiv"></div>
+</div>
+
+<div id="aladinFrameControls">
+<label>
+      Preview mode
+      <span class="muted"> • framing overlay</span>
+</label>
+<div class="preview-mode-group" id="aladinPreviewModeGroup">
+<label class="seg"><input checked="" id="aladinPreviewAltAz" name="aladinPreviewMode" type="radio" value="altaz"/><span>Alt-Az</span></label>
+<label class="seg"><input id="aladinPreviewEq" name="aladinPreviewMode" type="radio" value="eq"/><span>EQ</span></label>
+</div>
+<label class="seg seg-toggle"><input checked="" id="aladinShowFovToggle" type="checkbox"/><span>FOV</span></label>
+<span class="pill" id="aladinPreviewModeValue">Alt-Az</span>
+</div>
 </div>
 <div id="yearPane" style="display:none;">
 <canvas id="yearCanvas"></canvas>
@@ -250,12 +265,13 @@
 <div class="muted" id="tableHint">Tap a row • Tap headers to sort</div>
 </div>
 <div class="table-scroll">
-<table id=\"objectsTable\">
+<table id="objectsTable">
 <thead>
 <tr>
 <th data-key="name" style="min-width:140px;">Name <span class="arrow" id="arrow-name"></span></th>
 <!-- ✅ Mobile-only visibility (2nd column on mobile) -->
 <th class="mobile-only" data-key="visibility" style="min-width:120px;">Visibility <span class="arrow" id="arrow-visibility-m"></span></th>
+<th class="non-advanced-only" data-key="notes" style="min-width:220px;">Notes <span class="arrow" id="arrow-notes"></span></th>
 
 <th class="advanced-only mobile-only" data-key="snr" style="min-width:90px;">SNR <span class="arrow" id="arrow-snr-m"></span></th>
 <th class="desktop-only" data-key="common_name" style="min-width:160px;">Common Name <span class="arrow" id="arrow-common_name"></span></th>
@@ -270,7 +286,7 @@
 </tr>
 </thead>
 <tbody id="objectsTbody">
-<tr><td class="muted" colspan="10" style="padding:12px;">Loading…</td></tr>
+<tr><td class="muted" colspan="11" style="padding:12px;">Loading…</td></tr>
 </tbody>
 </table>
 </div>
@@ -294,6 +310,7 @@
 <li>Aladin Lite (sky viewer): <a href="https://aladin.cds.unistra.fr/AladinLite/" rel="noopener" target="_blank">aladin.cds.unistra.fr</a></li>
 <li>DSS2 (Digitized Sky Survey, served via Aladin/HiPS): <a href="https://archive.stsci.edu/dss/" rel="noopener" target="_blank">STScI DSS</a></li>
 <li>Sunrise/sunset algorithm — NOAA Solar Calculator method (implemented locally in JS): <a href="https://gml.noaa.gov/grad/solcalc/" rel="noopener" target="_blank">NOAA SolCalc</a></li>
+<li>Deep-sky object data: obtained from <a href="https://stellarium.org/" rel="noopener" target="_blank">Stellarium</a>.</li>
 </ul>
 </div>
 </div>
@@ -304,7 +321,8 @@
   </footer>
 <!-- Aladin Lite v3 -->
 <script charset="utf-8" src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"></script>
-<!-- DeepSkyScout extracted JS (your big inline <script> moved here) -->
-<script defer="" src="js/deepskyscout.js"></script>
+<!-- DeepSkyScout modular JS -->
+<script defer src="js/deepskyscout-core.js"></script>
+<script defer src="js/deepskyscout-ui.js"></script>
 </body>
 </html>
