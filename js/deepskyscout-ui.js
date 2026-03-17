@@ -808,15 +808,18 @@ box.innerHTML = `
     const yearPane  = $("yearPane");
 
     const nightOnly = document.querySelectorAll(".night-only");
+    const imageOnly = document.querySelectorAll(".image-only");
     const surveyWrap = $("surveyWrap");
     const chartTitleText = $("chartTitleText");
+    const sepNight = $("sepNight");
 
     if (mode === "night") {
       nightPane.style.display = "";
       imagePane.style.display = "none";
       yearPane.style.display  = "none";
       nightOnly.forEach(el => el.style.display = "inline-flex");
-      $("sepNight").style.display = "inline-flex";
+      imageOnly.forEach(el => el.style.display = "none");
+      sepNight.style.display = "inline-flex";
       surveyWrap.style.display = "none";
       chartTitleText.textContent = "Tonight’s Visibility";
       updateDateUI();
@@ -831,8 +834,9 @@ box.innerHTML = `
       imagePane.style.display = "flex";
       yearPane.style.display  = "none";
       nightOnly.forEach(el => el.style.display = "none");
-      $("sepNight").style.display = "none";
-      surveyWrap.style.display = "flex";
+      imageOnly.forEach(el => el.style.display = "inline-flex");
+      sepNight.style.display = "inline-flex";
+      surveyWrap.style.display = "inline-flex";
       chartTitleText.textContent = "Sky Image (Aladin)";
       initAladinIfNeeded();
       updateAllResponsiveUI();
@@ -845,7 +849,8 @@ box.innerHTML = `
     imagePane.style.display = "none";
     yearPane.style.display  = "";
     nightOnly.forEach(el => el.style.display = "none");
-    $("sepNight").style.display = "none";
+    imageOnly.forEach(el => el.style.display = "none");
+    sepNight.style.display = "none";
     surveyWrap.style.display = "none";
     chartTitleText.textContent = "Monthly Visibility";
     updateAllResponsiveUI();
