@@ -84,9 +84,20 @@
                   Mosaic (viewer)
                   <span class="muted" id="mosaicFovLabel"> • FoV: —</span>
 </label>
+<div class="range-stack range-stack--with-ticks">
 <div class="range-wrap">
+<div aria-hidden="true" class="range-input-wrap range-input-wrap--ticks">
 <input id="mosaicRange" max="5" min="1" step="1" type="range" value="1"/>
+<div class="range-dot-strip">
+<span></span>
+<span></span>
+<span></span>
+<span></span>
+<span></span>
+</div>
+</div>
 <span class="pill" id="mosaicLabel">1×</span>
+</div>
 </div>
 </div>
 <div class="form-row" id="telescopeRow">
@@ -174,6 +185,7 @@
 <button aria-label="Previous day" class="date-btn" id="datePrev" type="button">‹</button>
 <button class="date-pill" id="dateDisplay" title="Pick a date" type="button">—</button>
 <button aria-label="Next day" class="date-btn" id="dateNext" type="button">›</button>
+<button class="date-today-btn" id="dateTodayBtn" style="display:none;" title="Return to the current date" type="button">Back to today</button>
 <input id="datePicker" style="display:none;" type="date"/>
 </span>
 <span class="date-nav image-only" id="surveyWrap" style="display:none;" title="Select image survey">
@@ -324,6 +336,9 @@
 <script charset="utf-8" src="https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js"></script>
 <!-- DeepSkyScout modular JS -->
 <script defer src="js/deepskyscout-core.js"></script>
-<script defer src="js/deepskyscout-ui.js"></script>
+<script defer src="js/deepskyscout-ui-table.js"></script>
+<script defer src="js/deepskyscout-ui-night.js"></script>
+<script defer src="js/deepskyscout-ui-aladin.js"></script>
+<script defer src="js/deepskyscout-ui-app.js"></script>
 </body>
 </html>
