@@ -176,6 +176,14 @@
 <button aria-label="Next day" class="date-btn" id="dateNext" type="button">›</button>
 <input id="datePicker" style="display:none;" type="date"/>
 </span>
+<span class="date-nav image-only" id="surveyWrap" style="display:none;" title="Select image survey">
+<select id="surveySelect" aria-label="Survey">
+<option selected="" value="P/DSS2/color">DSS2 color</option>
+<option value="https://www.simg.de/nebulae3/dr0_2/rgb8/">NSNS RGB Continuum</option>
+<option value="https://www.simg.de/nebulae3/dr0_2/ohs8/">NSNS OIII Halpha and SII</option>
+<option value="https://www.simg.de/nebulae3/dr0_2/hbr8/">NSNS H-alpha and continuum</option>
+</select>
+</span>
 </div>
 <div class="chart-toggles">
 <div class="chart-left">
@@ -192,7 +200,7 @@
                   Monthly Visibility
                 </label>
 </div>
-<span class="sep night-only" id="sepNight"></span>
+<span class="sep" id="sepNight"></span>
 <div class="chart-middle">
 <label class="toggle night-only" title="Show altitude/azimuth grid">
 <input checked="" id="gridAltAz" name="gridMode" type="radio" value="altaz"/>
@@ -202,15 +210,14 @@
 <input id="gridEqu" name="gridMode" type="radio" value="equ"/>
                   Equatorial
                 </label>
-</div>
-<div class="chart-right" id="surveyWrap" style="display:none;">
-<label for="surveySelect">Survey</label>
-<select id="surveySelect">
-<option selected="" value="P/DSS2/color">DSS2 color</option>
-<option value="https://www.simg.de/nebulae3/dr0_2/rgb8/">NSNS RGB Continuum</option>
-<option value="https://www.simg.de/nebulae3/dr0_2/ohs8/">NSNS OIII Halpha and SII</option>
-<option value="https://www.simg.de/nebulae3/dr0_2/hbr8/">NSNS H-alpha and continuum</option>
-</select>
+<label class="toggle image-only" style="display:none;" title="Show altitude/azimuth framing overlay">
+<input checked="" id="aladinPreviewAltAz" name="aladinPreviewMode" type="radio" value="altaz"/>
+                  Alt-Az
+                </label>
+<label class="toggle image-only" style="display:none;" title="Show equatorial framing overlay">
+<input id="aladinPreviewEq" name="aladinPreviewMode" type="radio" value="eq"/>
+                  Equatorial
+                </label>
 </div>
 </div>
 </div>
@@ -226,16 +233,10 @@
 </div>
 
 <div id="aladinFrameControls">
-<label>
-      Preview mode
-      <span class="muted"> • framing overlay</span>
-</label>
-<div class="preview-mode-group" id="aladinPreviewModeGroup">
-<label class="seg"><input checked="" id="aladinPreviewAltAz" name="aladinPreviewMode" type="radio" value="altaz"/><span>Alt-Az</span></label>
-<label class="seg"><input id="aladinPreviewEq" name="aladinPreviewMode" type="radio" value="eq"/><span>EQ</span></label>
+<div class="aladin-frame-hint">
+<span class="muted">Framing overlay</span>
 </div>
 <label class="seg seg-toggle"><input checked="" id="aladinShowFovToggle" type="checkbox"/><span>FOV</span></label>
-<span class="pill" id="aladinPreviewModeValue">Alt-Az</span>
 </div>
 </div>
 <div id="yearPane" style="display:none;">
