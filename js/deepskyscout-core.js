@@ -370,6 +370,17 @@ const $ = (id) => document.getElementById(id);
     return ymdNow;
   }
 
+  function getTodayIsoForLocation(loc){
+    const tz = loc?.timezone || "UTC";
+    const ymdNow = getZonedYMD(new Date(), tz);
+    return ymdToIso(ymdNow.y, ymdNow.m, ymdNow.d);
+  }
+
+  function isSelectedDateToday(loc){
+    getBaseYmdForLocation(loc);
+    return (SELECTED_DATE_ISO || "") === getTodayIsoForLocation(loc);
+  }
+
   function formatSelectedDateForDisplay(loc){
     const tz = loc?.timezone || "UTC";
     const iso = SELECTED_DATE_ISO || ymdToIso(getZonedYMD(new Date(), tz).y, getZonedYMD(new Date(), tz).m, getZonedYMD(new Date(), tz).d);
@@ -382,11 +393,21 @@ const $ = (id) => document.getElementById(id);
     const loc = getCurrentLocation();
     const disp = $("dateDisplay");
     const picker = $("datePicker");
+    const todayBtn = $("dateTodayBtn");
     if (!loc || !disp || !picker) return;
 
     getBaseYmdForLocation(loc);
     disp.textContent = formatSelectedDateForDisplay(loc);
     picker.value = SELECTED_DATE_ISO || "";
+
+    const isToday = isSelectedDateToday(loc);
+    disp.classList.toggle("is-today", isToday);
+    disp.classList.toggle("is-not-today", !isToday);
+    disp.setAttribute("aria-label", isToday ? "Selected date is today" : "Selected date is not today");
+
+    if (todayBtn) {
+      todayBtn.style.display = isToday ? "none" : "inline-flex";
+    }
   }
 
   async function setSelectedDateIso(newIso, { switchToNight = true } = {}){
