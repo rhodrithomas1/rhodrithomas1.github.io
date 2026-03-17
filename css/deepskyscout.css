@@ -182,6 +182,35 @@
   outline:none;
 }
 
+.form-row select,
+.table-controls select,
+#surveyWrap select{
+  -webkit-appearance:auto;
+  -moz-appearance:auto;
+  appearance:auto;
+  padding-right:12px;
+  background-color:#111733;
+  color:#e9eefb;
+  color-scheme:dark;
+  background-image:none !important;
+}
+
+.form-row select::-ms-expand,
+.table-controls select::-ms-expand,
+#surveyWrap select::-ms-expand{
+  display:none;
+}
+
+.form-row select option,
+.table-controls select option,
+#surveyWrap select option,
+.form-row select optgroup,
+.table-controls select optgroup,
+#surveyWrap select optgroup{
+  background:#111733;
+  color:#e9eefb;
+}
+
 /* Legacy hook (kept, but surveyWrap is the real driver) */
 .chart-right{
   min-width:0 !important;
@@ -281,7 +310,6 @@
 
 .form-row select,
 .form-row input[type="number"],
-.form-row input[type="range"],
 .form-row input[type="file"]{
   width:100%;
   padding:10px 12px;
@@ -299,7 +327,65 @@
 }
 
 .range-wrap{ display:flex; gap:10px; align-items:center; }
-.range-wrap input[type="range"]{ padding:0; height:34px; }
+.range-wrap input[type="range"]{
+  flex:1 1 auto;
+  min-width:0;
+  margin:0;
+}
+
+.range-stack{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+
+.range-input-wrap{
+  position:relative;
+  flex:1 1 auto;
+  min-width:0;
+}
+
+.range-input-wrap > input[type="range"]{
+  position:relative;
+  z-index:2;
+}
+
+.range-input-wrap--ticks .range-dot-strip{
+  position:absolute;
+  left:8px;
+  right:8px;
+  top:50%;
+  transform:translateY(-50%);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  pointer-events:none;
+  z-index:3;
+}
+
+.range-input-wrap--ticks .range-dot-strip span{
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:rgba(255,255,255,.30);
+  border:1px solid rgba(12,18,36,.74);
+  box-shadow:0 0 0 1px rgba(0,0,0,.10);
+}
+
+.range-ticks{
+  display:grid;
+  grid-template-columns:repeat(5, minmax(0, 1fr));
+  gap:0;
+  padding:0 8px;
+  margin-top:-2px;
+  font-size:.82rem;
+  opacity:.78;
+}
+
+.range-ticks span{
+  text-align:center;
+  white-space:nowrap;
+}
 
 .pill{
   display:inline-block;
@@ -381,12 +467,12 @@ thead th{
   text-align:left;
   padding:10px 12px;
   border-bottom:1px solid rgba(255,255,255,.10);
-  opacity:.9;
+  opacity:.96;
   font-weight:600;
   position:sticky;
   top:0;
-  background:rgba(10,10,20,.92);
-  backdrop-filter: blur(6px);
+  z-index:2;
+  background:var(--table-head-bg);
   user-select:none;
   cursor:pointer;
   white-space:nowrap;
@@ -412,7 +498,7 @@ td.snr-cell{
 
 /* Active sorted column highlight */
 thead th.sorted-col{
-  background: var(--sorted-col-head-bg);
+  background: var(--table-head-bg-sorted);
   box-shadow: inset 0 -1px 0 rgba(255,255,255,.08);
 }
 
@@ -574,7 +660,7 @@ tbody tr.selected td.sorted-col{
   margin-left:4px;
 }
 
-.date-btn, .date-pill{
+.date-btn, .date-pill, .date-today-btn{
   border-radius:999px;
   border:1px solid rgba(255,255,255,.15);
   background:rgba(0,0,0,.22);
@@ -591,13 +677,36 @@ tbody tr.selected td.sorted-col{
 }
 
 .date-pill{
-  padding:6px 10px;
+  padding:7px 12px;
   font-size:.92rem;
   white-space:nowrap;
-  opacity:.95;
+  opacity:.98;
+  font-weight:600;
+  transition:background .18s ease, border-color .18s ease, box-shadow .18s ease, color .18s ease;
 }
 
-.date-btn:hover, .date-pill:hover{
+.date-pill.is-today{
+  background:linear-gradient(180deg, rgba(23,88,53,.98), rgba(16,66,40,.98));
+  border-color:rgba(115,220,155,.42);
+  color:#f1fff6;
+  box-shadow:0 0 0 1px rgba(76,186,117,.16) inset, 0 4px 14px rgba(15,60,36,.22);
+}
+
+.date-pill.is-not-today{
+  background:linear-gradient(180deg, rgba(106,33,33,.98), rgba(78,22,22,.98));
+  border-color:rgba(255,128,128,.38);
+  color:#fff2f2;
+  box-shadow:0 0 0 1px rgba(180,70,70,.16) inset, 0 4px 14px rgba(75,16,16,.22);
+}
+
+.date-today-btn{
+  padding:7px 12px;
+  font-size:.88rem;
+  white-space:nowrap;
+  font-weight:600;
+}
+
+.date-btn:hover, .date-pill:hover, .date-today-btn:hover{
   background:rgba(255,255,255,.07);
 }
 
@@ -769,6 +878,11 @@ tbody tr.selected td.sorted-col{
   .chart-body{ padding: 8px; }
   .card-head{ padding: 9px 10px; }
 
+  .range-ticks{
+    font-size:.74rem;
+    padding:0 4px;
+  }
+
   .mobile-chart-info{ display:block; }
 
   .table-scroll{ max-height: 32vh; }
@@ -902,7 +1016,8 @@ html.nightmode nav a.active{
 
 /* Sticky table header had a blue/indigo tint */
 html.nightmode thead th{
-  background: rgba(0,0,0,0.90) !important;
+  background:var(--table-head-bg) !important;
+  border-bottom-color: rgba(255,77,77,0.10) !important;
 }
 
 /* Nightmode button sits at far right without affecting tab spacing */
@@ -948,68 +1063,194 @@ html.nightmode .hero h1{
 }
 
 
-/* --- Nightmode range sliders --- */
-/* Nightmode range sliders: red fill + darker grey remainder */
-html.nightmode{
-  --range-fill: rgba(255,77,77,0.88);
-  --range-rest: rgba(255,255,255,0.16);
+/* --- Accent color, sliders and table scrollbars --- */
+:root{
+  --accent-orange: #ff7a45;
+  --accent-orange-soft: rgba(255,122,69,.16);
+  --accent-orange-mid: rgba(255,122,69,.42);
+  --range-fill: #ff7a45;
+  --range-rest: rgba(255,255,255,.18);
+  --range-thumb-border: rgba(16,20,36,.88);
+  --table-scroll-track: rgba(255,255,255,.07);
+  --table-scroll-thumb: rgba(255,255,255,.20);
+  --table-scroll-thumb-hover: rgba(255,255,255,.30);
+  --table-head-bg: #111733;
+  --table-head-bg-sorted: #1a2348;
+  --select-arrow-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23e9eefb' d='M4.47 6.97a.75.75 0 0 1 1.06 0L8 9.44l2.47-2.47a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 0 1 0-1.06Z'/%3E%3C/svg%3E");
 }
 
-html.nightmode input[type="range"]{
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
-  border-radius: 999px;
-  background: linear-gradient(to right,
+html.nightmode{
+  --range-fill: #ff7a45;
+  --range-rest: rgba(255,255,255,.16);
+  --range-thumb-border: rgba(0,0,0,.68);
+  --table-scroll-track: rgba(0,0,0,.28);
+  --table-scroll-thumb: rgba(255,255,255,.16);
+  --table-scroll-thumb-hover: rgba(255,255,255,.26);
+  --table-head-bg: #050505;
+  --table-head-bg-sorted: #120c0c;
+  --select-arrow-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23ff8a8a' d='M4.47 6.97a.75.75 0 0 1 1.06 0L8 9.44l2.47-2.47a.75.75 0 1 1 1.06 1.06l-3 3a.75.75 0 0 1-1.06 0l-3-3a.75.75 0 0 1 0-1.06Z'/%3E%3C/svg%3E");
+}
+
+html.nightmode .range-input-wrap--ticks .range-dot-strip span{
+  background:rgba(255,115,115,.24);
+  border-color:rgba(0,0,0,.72);
+}
+
+html.nightmode .range-ticks{
+  color:rgba(255,95,95,.88);
+}
+
+html.nightmode .form-row select,
+html.nightmode .table-controls select,
+html.nightmode #surveyWrap select{
+  background-color:#050505;
+  color:#ff8a8a;
+  border-color:rgba(255,77,77,.18);
+  color-scheme:dark;
+  background-image:none !important;
+}
+
+html.nightmode .form-row select option,
+html.nightmode .table-controls select option,
+html.nightmode #surveyWrap select option,
+html.nightmode .form-row select optgroup,
+html.nightmode .table-controls select optgroup,
+html.nightmode #surveyWrap select optgroup{
+  background:#050505;
+  color:#ff8a8a;
+}
+
+.form-row select,
+.table-controls select,
+#surveyWrap select,
+html.nightmode .form-row select,
+html.nightmode .table-controls select,
+html.nightmode #surveyWrap select{
+  background-repeat:no-repeat;
+  box-shadow:none;
+}
+
+input[type="radio"],
+input[type="checkbox"]{
+  accent-color: var(--accent-orange);
+}
+
+input[type="range"]{
+  -webkit-appearance:none;
+  appearance:none;
+  width:100%;
+  height:18px;
+  padding:0 !important;
+  border:none !important;
+  border-radius:999px;
+  background:transparent !important;
+  outline:none;
+  box-shadow:none;
+  cursor:pointer;
+  accent-color: var(--accent-orange);
+}
+
+input[type="range"]::-webkit-slider-runnable-track{
+  height:6px;
+  background:linear-gradient(to right,
     var(--range-fill) 0%,
     var(--range-fill) var(--p, 0%),
     var(--range-rest) var(--p, 0%),
     var(--range-rest) 100%
   );
-  outline: none;
+  border:none;
+  border-radius:999px;
 }
 
-/* WebKit track/thumb */
-html.nightmode input[type="range"]::-webkit-slider-runnable-track{
-  height: 6px;
-  background: transparent;
-  border-radius: 999px;
+#mosaicRange::-webkit-slider-runnable-track{
+  background:
+    linear-gradient(to right,
+      var(--range-fill) 0%,
+      var(--range-fill) var(--p, 0%),
+      var(--range-rest) var(--p, 0%),
+      var(--range-rest) 100%
+    );
 }
 
-html.nightmode input[type="range"]::-webkit-slider-thumb{
-  -webkit-appearance: none;
-  appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: rgba(255,77,77,0.98);
-  border: 2px solid rgba(0,0,0,0.65);
-  box-shadow: 0 0 0 1px rgba(255,77,77,0.25), 0 0 10px rgba(255,77,77,0.15);
-  margin-top: -5px; /* centers thumb on 6px track */
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none;
+  appearance:none;
+  width:16px;
+  height:16px;
+  border-radius:50%;
+  background:var(--accent-orange);
+  border:2px solid var(--range-thumb-border);
+  box-shadow:0 1px 4px rgba(0,0,0,.22);
+  margin-top:-5px;
 }
 
-/* Firefox track/progress/thumb */
-html.nightmode input[type="range"]::-moz-range-track{
-  height: 6px;
-  background: var(--range-rest);
-  border-radius: 999px;
+input[type="range"]::-moz-range-track{
+  height:6px;
+  background:var(--range-rest);
+  border:none;
+  border-radius:999px;
 }
 
-html.nightmode input[type="range"]::-moz-range-progress{
-  height: 6px;
-  background: var(--range-fill);
-  border-radius: 999px;
+input[type="range"]::-moz-range-progress{
+  height:6px;
+  background:var(--range-fill);
+  border:none;
+  border-radius:999px;
 }
 
-html.nightmode input[type="range"]::-moz-range-thumb{
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: rgba(255,77,77,0.98);
-  border: 2px solid rgba(0,0,0,0.65);
-  box-shadow: 0 0 0 1px rgba(255,77,77,0.25), 0 0 10px rgba(255,77,77,0.15);
+input[type="range"]::-moz-range-thumb{
+  width:16px;
+  height:16px;
+  border-radius:50%;
+  background:var(--accent-orange);
+  border:2px solid var(--range-thumb-border);
+  box-shadow:0 1px 4px rgba(0,0,0,.22);
 }
 
+input[type="range"]:focus-visible::-webkit-slider-thumb{
+  box-shadow:0 0 0 3px rgba(255,122,69,.20), 0 1px 4px rgba(0,0,0,.22);
+}
+
+input[type="range"]:focus-visible::-moz-range-thumb{
+  box-shadow:0 0 0 3px rgba(255,122,69,.20), 0 1px 4px rgba(0,0,0,.22);
+}
+
+.table-scroll{
+  scrollbar-width:thin;
+  scrollbar-color:var(--table-scroll-thumb) var(--table-scroll-track);
+}
+
+.table-scroll::-webkit-scrollbar{
+  width:12px;
+  height:12px;
+}
+
+.table-scroll::-webkit-scrollbar-track{
+  background:var(--table-scroll-track);
+  border-radius:999px;
+}
+
+.table-scroll::-webkit-scrollbar-thumb{
+  background:var(--table-scroll-thumb);
+  border-radius:999px;
+  border:2px solid transparent;
+  background-clip:padding-box;
+}
+
+.table-scroll::-webkit-scrollbar-thumb:hover{
+  background:var(--table-scroll-thumb-hover);
+  border:2px solid transparent;
+  background-clip:padding-box;
+}
+
+.table-scroll::-webkit-scrollbar-corner{
+  background:transparent;
+}
+
+html.nightmode input[type="radio"],
+html.nightmode input[type="checkbox"]{
+  accent-color: var(--accent-orange);
+}
 
 /* Hide the legacy Subtype column (JS adds this class to the th/td). */
 th.hide-subtype, td.hide-subtype{ display:none !important; }
@@ -1074,6 +1315,7 @@ html.nightmode .toggle,
 html.nightmode .pill,
 html.nightmode .date-btn,
 html.nightmode .date-pill,
+html.nightmode .date-today-btn,
 html.nightmode .action-btn{
   background: rgba(10,10,10,0.94) !important;
   border-color: rgba(255,77,77,0.16) !important;
@@ -1082,6 +1324,34 @@ html.nightmode .action-btn{
 html.nightmode .toggle:hover,
 html.nightmode .date-btn:hover,
 html.nightmode .date-pill:hover,
+html.nightmode .date-today-btn:hover,
 html.nightmode .action-btn:hover{
   background: rgba(18,18,18,0.96) !important;
 }
+
+
+html.nightmode .date-pill.is-today{
+  background:linear-gradient(180deg, rgba(15,66,38,.98), rgba(10,48,28,.98)) !important;
+  border-color:rgba(92,202,136,.34) !important;
+  color:#effff4 !important;
+}
+
+html.nightmode .date-pill.is-not-today{
+  background:linear-gradient(180deg, rgba(88,24,24,.98), rgba(62,16,16,.98)) !important;
+  border-color:rgba(226,102,102,.28) !important;
+  color:#fff0f0 !important;
+}
+
+@media (max-width: 900px){
+  .date-nav{
+    row-gap:8px;
+  }
+
+  .date-today-btn{
+    max-width:100%;
+  }
+}
+
+
+/* Cleanup: keep mosaic dots without the numbered labels */
+.range-ticks{ display:none !important; }
