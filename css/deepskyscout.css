@@ -121,80 +121,116 @@
 .card-head .status{ opacity:.9; font-size:.95rem; }
 .muted{ opacity:.8; }
 
-/* --- Chart header: ALWAYS one line (radios + grid + survey) --- */
-.chart-toggles{
+/* --- Chart header: responsive toolbar --- */
+#chartTitle{
   display:flex;
   align-items:center;
   gap:10px;
+  flex-wrap:wrap;
   width:100%;
-  flex-wrap: nowrap;     /* ✅ force one line */
-  min-width: 0;
-  overflow-x: auto;      /* ✅ safety: if viewport too small, it scrolls instead of wrapping */
+}
+
+#chartTitleText{
+  font-weight:600;
+}
+
+.chart-toggles{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  width:100%;
+  flex-wrap:wrap;
+  min-width:0;
+  overflow:visible;
 }
 
 .chart-left{
   display:flex;
   gap:10px;
   align-items:center;
-  flex: 1 1 auto;        /* takes remaining space */
-  min-width: 0;          /* ✅ allow shrinking */
-  flex-wrap: nowrap;     /* ✅ keep the 3 radios on one line */
+  flex:1 1 560px;
+  min-width:0;
+  flex-wrap:wrap;
 }
 
 .chart-middle{
   display:flex;
   gap:10px;
   align-items:center;
-  flex: 0 0 auto;
-  min-width: 0;
-  flex-wrap: nowrap;
+  flex:0 1 auto;
+  min-width:0;
+  flex-wrap:wrap;
 }
 
 #surveyWrap{
-  display:flex;
-  gap:8px;
+  display:none;
   align-items:center;
-  flex: 0 0 auto;         /* ✅ DO NOT grow */
-  min-width: 0;
-  white-space: nowrap;
-  margin-left: auto;      /* push it to the far right */
-}
-
-#surveyWrap label{
-  opacity:.9;
-  font-size:.92rem;
-  white-space: nowrap;
+  gap:8px;
+  margin-left:auto;
+  min-width:0;
 }
 
 #surveyWrap select{
-  width: 220px;           /* ✅ fixed/compact so it doesn't mess up radios */
-  max-width: 220px;
-  min-width: 160px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  width:220px;
+  max-width:220px;
+  min-width:160px;
+  padding:8px 10px;
+  border-radius:999px;
   border:1px solid rgba(255,255,255,.15);
-  background:rgba(0,0,0,.25);
+  background:rgba(0,0,0,.22);
   color:inherit;
   outline:none;
 }
 
-/* If the chart column is narrow, put Survey on its own line (keeps radios together) */
-@media (max-width: 1350px){
-  #surveyWrap{
-    flex-basis: 100%;
-    justify-content: flex-end;
-  }
-}
-
-/* Legacy hook (kept, but now surveyWrap is the real driver) */
+/* Legacy hook (kept, but surveyWrap is the real driver) */
 .chart-right{
-  min-width: 0 !important;  /* allow shrinking */
-  flex: 1 1 320px;          /* can wrap under left if needed */
-  justify-content: flex-end;
+  min-width:0 !important;
+  flex:1 1 320px;
+  justify-content:flex-end;
 }
 
 .chart-right select{
-  max-width: 100% !important; /* don't cap at 300px */
+  max-width:100% !important;
+}
+
+/* Medium screens: stop the view/grid controls from colliding */
+@media (max-width: 1180px){
+  .chart-left{
+    flex-basis:100%;
+  }
+
+  .chart-middle{
+    flex:0 0 auto;
+  }
+
+  #surveyWrap{
+    margin-left:0;
+  }
+
+  #sepNight{
+    display:none;
+  }
+}
+
+/* Narrow tablets / smaller laptops */
+@media (max-width: 900px){
+  .chart-left,
+  .chart-middle,
+  #surveyWrap{
+    flex-basis:100%;
+    margin-left:0;
+  }
+
+  .chart-left,
+  .chart-middle,
+  #surveyWrap{
+    justify-content:flex-start;
+  }
+
+  #surveyWrap select{
+    width:100%;
+    max-width:320px;
+  }
 }
 
 .toggle{
@@ -227,6 +263,7 @@
 }
 
 .night-only{ display:inline-flex; }
+.image-only{ display:none; }
 
 /* Controls grid */
 .form-grid{
@@ -440,6 +477,7 @@ tbody tr.selected td.sorted-col{
   width:min(100%, 720px);
   display:flex;
   align-items:center;
+  justify-content:space-between;
   gap:12px;
   flex-wrap:wrap;
   padding:8px 12px;
@@ -448,16 +486,10 @@ tbody tr.selected td.sorted-col{
   background:rgba(255,255,255,.04);
 }
 
-#aladinFrameControls label{
-  min-width:120px;
-}
-
-#aladinFrameControls .preview-mode-group{
-  flex:1 1 320px;
+#aladinFrameControls .aladin-frame-hint{
   display:flex;
   align-items:center;
   gap:8px;
-  flex-wrap:wrap;
 }
 
 #aladinFrameControls .seg{
@@ -475,7 +507,7 @@ tbody tr.selected td.sorted-col{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  min-width:92px;
+  min-width:74px;
   padding:9px 14px;
   border-radius:999px;
   border:1px solid rgba(255,255,255,.14);
@@ -487,10 +519,6 @@ tbody tr.selected td.sorted-col{
 
 #aladinFrameControls .seg span:hover{
   background:rgba(255,255,255,.07);
-}
-
-#aladinFrameControls .seg-toggle span{
-  min-width:74px;
 }
 
 #aladinFrameControls .seg-toggle{
@@ -539,15 +567,6 @@ tbody tr.selected td.sorted-col{
 .refs a{ color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 
 /* --- Date controls next to Tonight title --- */
-#chartTitle{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  flex-wrap:wrap;
-}
-
-#chartTitleText{ font-weight:600; }
-
 .date-nav{
   display:inline-flex;
   align-items:center;
@@ -583,6 +602,7 @@ tbody tr.selected td.sorted-col{
 }
 
 /* Table scroll area base cap (desktop gets overridden below) */
+
 .table-scroll{
   max-height: 520px;
   overflow:auto;
@@ -698,7 +718,6 @@ tbody tr.selected td.sorted-col{
     padding-bottom: 16px;
   }
 
-  /* Keep the three mode toggles horizontal */
   .chart-toggles{
     flex-direction: column;
     align-items: stretch;
@@ -709,7 +728,7 @@ tbody tr.selected td.sorted-col{
     min-width: 0 !important;
     width: 100%;
     display:grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -720,8 +739,20 @@ tbody tr.selected td.sorted-col{
     font-size: .85rem;
   }
 
-  /* Remove grid mode buttons (always Alt-Az) */
-  .chart-middle{ display:none !important; }
+  /* Keep image-mode framing toggles visible, but hide night grid mode buttons */
+  .chart-middle{
+    width: 100%;
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .chart-middle .night-only{ display:none !important; }
+  .chart-middle .image-only{
+    flex:1 1 calc(50% - 4px);
+    justify-content:center;
+  }
+
   #sepNight{ display:none !important; }
 
   /* Survey drops to full width (when visible) */
@@ -729,6 +760,7 @@ tbody tr.selected td.sorted-col{
     width: 100%;
     justify-content: stretch;
   }
+
   #surveyWrap select{
     width: 100%;
     max-width: none;
@@ -766,8 +798,7 @@ tbody tr.selected td.sorted-col{
     padding:8px 10px;
   }
 
-  #aladinFrameControls label{
-    min-width:auto;
+  #aladinFrameControls .aladin-frame-hint{
     width:100%;
   }
 }
@@ -982,3 +1013,75 @@ html.nightmode input[type="range"]::-moz-range-thumb{
 
 /* Hide the legacy Subtype column (JS adds this class to the th/td). */
 th.hide-subtype, td.hide-subtype{ display:none !important; }
+/* --- Darker nightmode panel backgrounds --- */
+html.nightmode .card{
+  background: rgba(8,8,8,0.96) !important;
+  border-color: rgba(255,77,77,0.14) !important;
+}
+
+html.nightmode .card-head{
+  background: rgba(6,6,6,0.96) !important;
+  border-bottom-color: rgba(255,77,77,0.10) !important;
+}
+
+html.nightmode .table-scroll{
+  background: rgba(5,5,5,0.96) !important;
+}
+
+html.nightmode table{
+  background: rgba(5,5,5,0.96) !important;
+}
+
+html.nightmode tbody tr{
+  background: transparent !important;
+}
+
+html.nightmode tbody tr:hover{
+  background: rgba(255,77,77,0.05) !important;
+}
+
+html.nightmode tbody tr.selected{
+  background: rgba(255,77,77,0.10) !important;
+  outline: 1px solid rgba(255,77,77,0.26) !important;
+}
+
+html.nightmode #skyCanvas,
+html.nightmode #yearCanvas,
+html.nightmode #aladinDiv{
+  background: rgba(4,4,4,0.98) !important;
+  border-color: rgba(255,77,77,0.12) !important;
+}
+
+html.nightmode .chart-body{
+  background: rgba(5,5,5,0.96) !important;
+}
+
+html.nightmode .chart-foot,
+html.nightmode .table-actions,
+html.nightmode .table-foot,
+html.nightmode .mobile-chart-info,
+html.nightmode .refs{
+  background: rgba(7,7,7,0.96) !important;
+  border-color: rgba(255,77,77,0.10) !important;
+}
+
+html.nightmode #aladinFrameControls{
+  background: rgba(9,9,9,0.96) !important;
+  border-color: rgba(255,77,77,0.12) !important;
+}
+
+html.nightmode .toggle,
+html.nightmode .pill,
+html.nightmode .date-btn,
+html.nightmode .date-pill,
+html.nightmode .action-btn{
+  background: rgba(10,10,10,0.94) !important;
+  border-color: rgba(255,77,77,0.16) !important;
+}
+
+html.nightmode .toggle:hover,
+html.nightmode .date-btn:hover,
+html.nightmode .date-pill:hover,
+html.nightmode .action-btn:hover{
+  background: rgba(18,18,18,0.96) !important;
+}
