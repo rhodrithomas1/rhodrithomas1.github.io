@@ -454,6 +454,30 @@
 
 .table-search input::placeholder{ opacity:.6; }
 
+.table-inline-toggle{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex:0 0 auto;
+  padding:6px 12px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(0,0,0,.18);
+  color:inherit;
+  cursor:pointer;
+  user-select:none;
+  white-space:nowrap;
+}
+
+.table-inline-toggle span{
+  font-size:.92rem;
+}
+
+.table-inline-toggle input{
+  margin:0;
+}
+
+
 /* Keep the hint visible and pushed to the right on desktop */
 #tableHint{
   margin-left:auto;
@@ -901,6 +925,7 @@ tbody tr.selected td.sorted-col{
 
   /* Make header simpler on mobile */
   #objectsCardHead{ justify-content: flex-start; }
+  .table-inline-toggle{ order:4; }
 
   /* On mobile the hint shouldn’t force width */
   #tableHint{
@@ -1340,6 +1365,12 @@ html.nightmode .date-pill.is-not-today{
   background:linear-gradient(180deg, rgba(88,24,24,.98), rgba(62,16,16,.98)) !important;
   border-color:rgba(226,102,102,.28) !important;
   color:#fff0f0 !important;
+}
+
+html.nightmode .table-inline-toggle{
+  background:rgba(255,77,77,.06);
+  border-color:rgba(255,77,77,.18);
+  color:#ff9a9a;
 }
 
 @media (max-width: 900px){
