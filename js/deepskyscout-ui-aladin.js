@@ -562,6 +562,7 @@
     const q = (NAME_QUERY || "").trim();
     const qTxt = q ? ` • search: "${q}"` : "";
     const stats = (typeof LAST_FILTER_STATS === "object" && LAST_FILTER_STATS) ? LAST_FILTER_STATS : null;
+    const visibleNowTxt = isVisibleNowEnabled() ? ` • ${getVisibleNowReason(getCurrentLocation())}` : "";
 
     let extraTxt = "";
     if (!SHOW_ALL_OBJECTS && stats) {
@@ -574,7 +575,7 @@
     }
 
     $("objectsStatus").textContent =
-      `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} (${mode})${qTxt}${extraTxt} • sorted by ${sortLabel()}`;
+      `✅ Showing ${FILTERED_INDICES.length}/${OBJECTS.length} (${mode})${qTxt}${visibleNowTxt}${extraTxt} • sorted by ${sortLabel()}`;
   }
 
   function updateShowAllBtnUI(){

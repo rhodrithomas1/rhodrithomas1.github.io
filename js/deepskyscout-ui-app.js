@@ -74,6 +74,19 @@
     });
   }
 
+  function wireVisibleNowToggle(){
+    const toggle = $("visibleNowToggle");
+    if (!toggle) return;
+
+    toggle.checked = isVisibleNowEnabled();
+    toggle.addEventListener("change", async () => {
+      setVisibleNowEnabled(toggle.checked);
+      clearNightPathOverlay();
+      await recomputeVisibilityAndRender();
+      updatePlannerLinkUI({ replaceBrowserUrl: true });
+    });
+  }
+
   function wireNameSearch(){
     const inp = $("nameSearch");
     if (!inp) return;
@@ -569,11 +582,29 @@
     });
   }
 
+  function wireVisibleNowAutoRefresh(){
+    let busy = false;
+    setInterval(async () => {
+      if (busy || !isVisibleNowEnabled()) return;
+      const loc = getCurrentLocation();
+      if (!loc || !isSelectedDateToday(loc)) return;
+      busy = true;
+      try {
+        await recomputeVisibilityAndRender();
+      } catch (err) {
+        console.warn("Visible-now auto-refresh failed:", err);
+      } finally {
+        busy = false;
+      }
+    }, 60000);
+  }
+
   // -----------------------------
   // Init
   // -----------------------------
   (async function init() {
     await loadAllJson();
+    loadVisibleNowPreference();
     await populateAllSelects();
 
     wireEvents();
@@ -581,6 +612,7 @@
     wireTableClick();
     wireArrowKeyObjectNav();
     wireNameSearch();
+    wireVisibleNowToggle();
     wireHeaderSort();
     wireShowAllBtn();
     updateShowAllBtnUI();
@@ -603,6 +635,7 @@
     wirePlannerLinkUI();
     wireNightModeToggle();
     wireRangeFills();
+    wireVisibleNowAutoRefresh();
 
     $("viewNight").checked = true;
     setViewMode("night");

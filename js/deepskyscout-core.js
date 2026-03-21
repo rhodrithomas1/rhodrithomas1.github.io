@@ -95,6 +95,7 @@ const $ = (id) => document.getElementById(id);
     shown: 0,
     excludedBySearch: 0,
     excludedByVisibility: 0,
+    excludedByVisibleNow: 0,
     excludedByType: 0,
     excludedByMinSize: 0,
     preMinSizeCandidates: 0,
@@ -122,6 +123,7 @@ const $ = (id) => document.getElementById(id);
 
   let viewMode = "night";
   let SHOW_ALL_OBJECTS = false;
+  let VISIBLE_NOW_ONLY = false;
 
   let NAME_QUERY = "";
 
@@ -379,6 +381,25 @@ const $ = (id) => document.getElementById(id);
   function isSelectedDateToday(loc){
     getBaseYmdForLocation(loc);
     return (SELECTED_DATE_ISO || "") === getTodayIsoForLocation(loc);
+  }
+
+  function isVisibleNowEnabled(){
+    return !!VISIBLE_NOW_ONLY;
+  }
+
+  function setVisibleNowEnabled(enabled, { persist = true } = {}){
+    VISIBLE_NOW_ONLY = !!enabled;
+    const el = $("visibleNowToggle");
+    if (el) el.checked = VISIBLE_NOW_ONLY;
+    if (persist) {
+      try { localStorage.setItem("ds_visible_now", VISIBLE_NOW_ONLY ? "1" : "0"); } catch (_err) {}
+    }
+  }
+
+  function loadVisibleNowPreference(){
+    let enabled = false;
+    try { enabled = localStorage.getItem("ds_visible_now") === "1"; } catch (_err) {}
+    setVisibleNowEnabled(enabled, { persist: false });
   }
 
   function formatSelectedDateForDisplay(loc){
@@ -878,6 +899,7 @@ function buildPlannerPermalink({ includeDefaultAssetHorizon = false } = {}){
   u.search = "";
   const params = u.searchParams;
   if (isAdvancedModeEnabled()) params.set("advanced", "1");
+  if (isVisibleNowEnabled()) params.set("visible_now", "1");
   const loc = getSelected($("locationSelect"), LOCATIONS);
   if (loc?.name) params.set("location", loc.name);
   const scope = getSelected($("telescopeSelect"), TELESCOPES);
@@ -913,7 +935,7 @@ function updatePlannerLinkUI({ replaceBrowserUrl = false } = {}){
 
 function wirePlannerLinkUI(){
   const refresh = debounce(() => updatePlannerLinkUI({ replaceBrowserUrl: true }), 80);
-  ["advancedToggle","locationSelect","telescopeSelect","reducerSelect","cameraSelect","bortleSelect","snrBroadbandSelect","snrNebulaBandpassSelect","customScopeDiameter","customScopeFocal"].forEach((id) => {
+  ["advancedToggle","visibleNowToggle","locationSelect","telescopeSelect","reducerSelect","cameraSelect","bortleSelect","snrBroadbandSelect","snrNebulaBandpassSelect","customScopeDiameter","customScopeFocal"].forEach((id) => {
     const el = $(id);
     if (!el) return;
     el.addEventListener("change", refresh);
@@ -924,11 +946,13 @@ function wirePlannerLinkUI(){
 
 async function applyUrlStateFromQuery(){
   const advanced = parseBooleanParam(getQueryParamValue(["advanced", "adv"]));
+  const visibleNow = parseBooleanParam(getQueryParamValue(["visible_now", "visibleNow", "now"]));
   if (advanced != null) {
     const advToggle = $("advancedToggle");
     if (advToggle) advToggle.checked = advanced;
     setAdvancedModeEnabled(advanced);
   }
+  if (visibleNow != null) setVisibleNowEnabled(visibleNow);
   const locationRaw = getQueryParamValue(["location", "loc"]);
   if (locationRaw) {
     const idx = findItemIndexByName(LOCATIONS, locationRaw);
@@ -2421,8 +2445,81 @@ async function applyUrlStateFromQuery(){
   }
 
 
+  function addDaysToYmd(ymd, days){
+    const dt = new Date(Date.UTC(ymd.y, ymd.m - 1, ymd.d + days, 12, 0, 0));
+    return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+  }
+
+  function getVisibleNowContext(location){
+    if (!VISIBLE_NOW_ONLY || !location) return null;
+    if (!isSelectedDateToday(location)) return null;
+
+    const tz = location.timezone || "UTC";
+    const now = new Date();
+    const nowMs = now.getTime();
+    const todayYmd = getZonedYMD(now, tz);
+    const prevYmd = addDaysToYmd(todayYmd, -1);
+
+    const prevNight = buildNightWindowUtcForYMD(location, prevYmd.y, prevYmd.m, prevYmd.d);
+    if (prevNight?.startUtc && prevNight?.endUtc) {
+      const prevStartMs = prevNight.startUtc.getTime();
+      const prevEndMs = prevNight.endUtc.getTime();
+      if (nowMs >= prevStartMs && nowMs <= prevEndMs) {
+        return {
+          nowUtc: now,
+          startUtc: now,
+          endUtc: prevNight.endUtc,
+          phase: "after_midnight"
+        };
+      }
+    }
+
+    const tonight = buildNightWindowUtcForYMD(location, todayYmd.y, todayYmd.m, todayYmd.d);
+    if (tonight?.startUtc && tonight?.endUtc) {
+      const tonightStartMs = tonight.startUtc.getTime();
+      const tonightEndMs = tonight.endUtc.getTime();
+      if (nowMs >= tonightStartMs && nowMs <= tonightEndMs) {
+        return {
+          nowUtc: now,
+          startUtc: now,
+          endUtc: tonight.endUtc,
+          phase: "night"
+        };
+      }
+      return {
+        nowUtc: now,
+        startUtc: now,
+        endUtc: tonight.endUtc,
+        phase: (nowMs < tonightStartMs) ? "before_sunset" : "after_sunrise"
+      };
+    }
+
+    return { nowUtc: now, startUtc: now, endUtc: now, phase: "unknown" };
+  }
+
+  function getVisibleNowInstantUtc(location){
+    const ctx = getVisibleNowContext(location);
+    if (!ctx) return null;
+    if (ctx.phase === "night" || ctx.phase === "after_midnight") return ctx.nowUtc;
+    return null;
+  }
+
+  function getVisibleNowReason(location){
+    if (!VISIBLE_NOW_ONLY) return "";
+    if (!location) return "visible now";
+    if (!isSelectedDateToday(location)) return "visible now (today only)";
+
+    const ctx = getVisibleNowContext(location);
+    if (!ctx) return "visible now";
+    if (ctx.phase === "after_midnight") return "visible now";
+    if (ctx.phase === "night") return "visible now";
+    if (ctx.phase === "before_sunset") return "visible now (before sunset)";
+    if (ctx.phase === "after_sunrise") return "visible now (after sunrise)";
+    return "visible now";
+  }
+
   // Standalone horizon: uses ONLY numeric floor OR ONLY custom profile (no stacking)
-  function computeVisibilityForObjectInWindow(location, horizonAtAzFn, raDeg, decDeg, startUtc, endUtc){
+  function computeVisibilityForObjectInWindow(location, horizonAtAzFn, raDeg, decDeg, startUtc, endUtc, nowUtc = null){
     const latDeg = Number(location.latitude);
     const lonDeg = Number(location.longitude);
 
@@ -2445,6 +2542,21 @@ async function applyUrlStateFromQuery(){
       alts[i] = altDeg;
       hzs[i] = horizonAtAzFn(azDeg);
       if (altDeg > maxAlt) maxAlt = altDeg;
+    }
+
+    let currentAltDeg = null;
+    let currentAzDeg = null;
+    let currentHorizonDeg = null;
+    let isAboveHorizonNow = false;
+    let isVisibleNow = false;
+
+    if (nowUtc instanceof Date && Number.isFinite(nowUtc.getTime())) {
+      const aaNow = raDecToAltAz(nowUtc, raDeg, decDeg, latDeg, lonDeg);
+      currentAltDeg = aaNow.altDeg;
+      currentAzDeg = aaNow.azDeg;
+      currentHorizonDeg = horizonAtAzFn(aaNow.azDeg);
+      isAboveHorizonNow = (currentAltDeg - currentHorizonDeg) >= 0;
+      isVisibleNow = isAboveHorizonNow && nowUtc.getTime() >= startMs && nowUtc.getTime() <= endMs;
     }
 
     let visibleSec = 0;
@@ -2523,7 +2635,12 @@ async function applyUrlStateFromQuery(){
       maxAltDeg: Number.isFinite(maxAlt) ? maxAlt : null,
       avgAltDeg,
       bestStartUtcMs: bestStart,
-      bestEndUtcMs: bestEnd
+      bestEndUtcMs: bestEnd,
+      currentAltDeg,
+      currentAzDeg,
+      currentHorizonDeg,
+      isAboveHorizonNow,
+      isVisibleNow
     };
   }
 
@@ -2533,6 +2650,9 @@ async function applyUrlStateFromQuery(){
 
     const horizonAtAzFn = getHorizonAtAzFn();
     const results = new Map();
+    const visibleNowContext = getVisibleNowContext(location);
+    const visibleNowInstant = (visibleNowContext && (visibleNowContext.phase === "night" || visibleNowContext.phase === "after_midnight")) ? visibleNowContext.nowUtc : null;
+    const visibleNowModeActive = !!VISIBLE_NOW_ONLY;
 
     for (let idx = 0; idx < OBJECTS.length; idx++) {
       const o = OBJECTS[idx];
@@ -2540,13 +2660,49 @@ async function applyUrlStateFromQuery(){
       const decDeg = parseDecDeg(o.dec);
 
       if (raDeg == null || decDeg == null) {
-        results.set(idx, { visibleSec: 0, totalMinutes: 0, maxAltDeg: null, avgAltDeg: null, bestStartUtcMs: null, bestEndUtcMs: null });
+        results.set(idx, {
+          visibleSec: 0,
+          totalMinutes: 0,
+          maxAltDeg: null,
+          avgAltDeg: null,
+          bestStartUtcMs: null,
+          bestEndUtcMs: null,
+          currentAltDeg: null,
+          currentAzDeg: null,
+          currentHorizonDeg: null,
+          isAboveHorizonNow: false,
+          isVisibleNow: false
+        });
         continue;
       }
 
+      if (visibleNowModeActive && !visibleNowInstant) {
+        results.set(idx, {
+          visibleSec: 0,
+          totalMinutes: 0,
+          maxAltDeg: null,
+          avgAltDeg: null,
+          bestStartUtcMs: null,
+          bestEndUtcMs: null,
+          currentAltDeg: null,
+          currentAzDeg: null,
+          currentHorizonDeg: null,
+          isAboveHorizonNow: false,
+          isVisibleNow: false
+        });
+        continue;
+      }
+
+      const effectiveStartUtc = visibleNowInstant || NIGHT_WINDOW.startUtc;
+      const effectiveEndUtc = visibleNowInstant ? (visibleNowContext?.endUtc || NIGHT_WINDOW.endUtc) : NIGHT_WINDOW.endUtc;
       const r = computeVisibilityForObjectInWindow(
-        location, horizonAtAzFn, raDeg, decDeg,
-        NIGHT_WINDOW.startUtc, NIGHT_WINDOW.endUtc
+        location,
+        horizonAtAzFn,
+        raDeg,
+        decDeg,
+        effectiveStartUtc,
+        effectiveEndUtc,
+        visibleNowInstant
       );
       results.set(idx, r);
     }
@@ -2627,6 +2783,7 @@ async function applyUrlStateFromQuery(){
 
   function applyFilters() {
     const tf = currentTypeFilter();
+    const visibleNowMode = !!VISIBLE_NOW_ONLY;
 
     const stats = {
       mode: SHOW_ALL_OBJECTS ? "all objects" : "filtered",
@@ -2634,6 +2791,7 @@ async function applyUrlStateFromQuery(){
       shown: 0,
       excludedBySearch: 0,
       excludedByVisibility: 0,
+      excludedByVisibleNow: 0,
       excludedByType: 0,
       excludedByMinSize: 0,
       preMinSizeCandidates: 0,
@@ -2641,15 +2799,19 @@ async function applyUrlStateFromQuery(){
       scaleAvailable: true
     };
 
-    // ✅ Show ALL objects (still respects Type dropdown)
     if (SHOW_ALL_OBJECTS) {
       FILTERED_INDICES = [];
       for (let idx = 0; idx < OBJECTS.length; idx++) {
         const o = OBJECTS[idx];
+        const vr = VIS_RESULTS.get(idx) || null;
 
-        // ✅ name/common-name search
         if (!matchesNameSearch(o)) {
           stats.excludedBySearch += 1;
+          continue;
+        }
+
+        if (visibleNowMode && !vr?.isVisibleNow) {
+          stats.excludedByVisibleNow += 1;
           continue;
         }
 
@@ -2667,7 +2829,6 @@ async function applyUrlStateFromQuery(){
       return;
     }
 
-    // ✅ Normal filtered mode (your original logic)
     const scale = computeImageScaleArcsecPerPixel();
     const minPx = minSizePixelsThreshold();
     stats.minSizeThresholdPx = Number.isFinite(minPx) ? minPx : 0;
@@ -2683,14 +2844,19 @@ async function applyUrlStateFromQuery(){
     FILTERED_INDICES = [];
     for (let idx = 0; idx < OBJECTS.length; idx++) {
       const o = OBJECTS[idx];
+      const vr = VIS_RESULTS.get(idx) || null;
 
-      // ✅ name/common-name search
       if (!matchesNameSearch(o)) {
         stats.excludedBySearch += 1;
         continue;
       }
 
-      const visSec = VIS_RESULTS.get(idx)?.visibleSec ?? 0;
+      if (visibleNowMode && !vr?.isVisibleNow) {
+        stats.excludedByVisibleNow += 1;
+        continue;
+      }
+
+      const visSec = vr?.visibleSec ?? 0;
       if (visSec <= 0) {
         stats.excludedByVisibility += 1;
         continue;
